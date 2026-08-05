@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zsumz/sallyport/schemas/release.schema.json",
+  "title": "sallyport release record",
+  "description": "Record describing a verified public npm release, produced by the sallyport finalize workflow before any GitHub Release is written.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol",
+    "candidateReceiptSha256",
+    "package",
+    "candidate",
+    "registry",
+    "source"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Record schema version.",
+      "const": 1
+    },
+    "protocol": {
+      "description": "Release protocol identifier.",
+      "const": "sallyport/0.1"
+    },
+    "candidateReceiptSha256": {
+      "description": "SHA-256 of the candidate receipt this release was finalized from.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "package": {
+      "description": "Published npm package coordinates.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "distTag"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^(?:@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "distTag": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+        }
+      }
+    },
+    "candidate": {
+      "description": "Digests of the staged candidate tarball.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "sha512"],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sha512": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{128}$"
+        }
+      }
+    },
+    "registry": {
+      "description": "Digests of the public registry tarball and the verifications that passed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "sha512",
+        "integrityVerified",
+        "signatureVerified",
+        "provenanceVerified"
+      ],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sha512": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{128}$"
+        },
+        "integrityVerified": {
+          "const": true
+        },
+        "signatureVerified": {
+          "const": true
+        },
+        "provenanceVerified": {
+          "const": true
+        }
+      }
+    },
+    "source": {
+      "description": "Source repository, tag and commit the release was built from.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "commit"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    }
+  }
+}

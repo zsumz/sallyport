@@ -1,0 +1,76 @@
+{
+  "name": "sallyport",
+  "version": "0.1.0-alpha.0",
+  "description": "Staged npm releases for GitHub Actions, without publishing tokens.",
+  "author": "zsumz <shawn@zsumz.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zsumz/sallyport.git"
+  },
+  "homepage": "https://github.com/zsumz/sallyport#readme",
+  "bugs": {
+    "url": "https://github.com/zsumz/sallyport/issues"
+  },
+  "type": "module",
+  "bin": {
+    "sallyport": "dist/cli/main.js"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    "sallyport-logo.svg",
+    "dist/**/*.js",
+    "templates/",
+    "schemas/",
+    "docs/"
+  ],
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "keywords": [
+    "npm",
+    "publish",
+    "release",
+    "staged-publishing",
+    "trusted-publishing",
+    "provenance",
+    "supply-chain",
+    "github-actions",
+    "ci"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "scripts": {
+    "clean": "rm -rf dist coverage",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p scripts/tsconfig.json && tsc -p test/tsconfig.json",
+    "lint": "eslint src scripts test smoke",
+    "architecture:check": "node scripts/architecture/check.mts",
+    "test": "npm run build && vitest run",
+    "coverage": "npm run build && vitest run --coverage",
+    "coverage:check": "npm run build && SALLYPORT_COVERAGE_CHECK=1 vitest run --coverage",
+    "smoke": "npm run build && smoque run smoke/ --ci",
+    "smoke:list": "smoque list smoke/",
+    "validate": "npm run typecheck && npm run lint && npm run architecture:check && npm test && npm pack --dry-run --json",
+    "release:check": "npm run validate && npm run coverage:check",
+    "release:smoke": "smoque run smoke/ --ci",
+    "publish:alpha": "node scripts/release/publish-alpha.mts",
+    "prepack": "npm run build",
+    "prepublishOnly": "node -e \"throw new Error('Publish the qualified SALLYPORT_TARBALL with npm run publish:alpha.')\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "eslint": "^10.6.0",
+    "eslint-config-rubric": "^0.1.0-alpha.0",
+    "smoque": "^0.1.1",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.9",
+    "yaml": "^2.6.0"
+  },
+  "license": "MIT"
+}

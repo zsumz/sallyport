@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.tmp/
+.idea/
+.DS_Store
+__MACOSX/
+*.tgz
+*.log
+*.tsbuildinfo
+smoke-results.json
+smoke-results.xml
+.claude/

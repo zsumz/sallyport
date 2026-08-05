@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="300" viewBox="0 0 1040 300" role="img" aria-labelledby="title desc">
+  <title id="title">sallyport</title>
+  <desc id="desc">A sallyport wordmark with a stepped gate mark and the words staged npm releases.</desc>
+
+  <rect width="1040" height="300" fill="#ffffff"/>
+
+  <g transform="translate(78 44)">
+    <path d="M12 12H152V52H52V92H136V132H52V172H152V212H12Z" fill="#1b252b"/>
+    <path d="M52 52H184V92H52Z" fill="#d89b3c"/>
+    <path d="M52 132H184V172H52Z" fill="#d89b3c"/>
+    <path d="M12 12H52V212H12Z" fill="#11171b"/>
+  </g>
+
+  <text x="314" y="72" fill="#69767d" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="21" font-weight="600" letter-spacing="7">STAGED NPM RELEASES</text>
+  <text x="306" y="220" fill="#11171b" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="134" font-weight="750" letter-spacing="4">sallyport</text>
+  <g transform="translate(314 264)">
+    <rect width="150" height="6" rx="3" fill="#1b252b"/>
+    <rect x="178" width="150" height="6" rx="3" fill="#d89b3c"/>
+    <rect x="356" width="150" height="6" rx="3" fill="#9eabb1"/>
+  </g>
+</svg>

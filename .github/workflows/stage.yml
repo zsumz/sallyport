@@ -1,0 +1,441 @@
+name: sallyport stage
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: Validation profile; standard or strict.
+        required: false
+        type: string
+        default: standard
+      signer_fingerprint:
+        description: Expected OpenPGP signer fingerprint for the strict profile.
+        required: false
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  prepare:
+    name: Prepare release candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate invocation
+        env:
+          SALLYPORT_EVENT: ${{ github.event_name }}
+          SALLYPORT_REF_TYPE: ${{ github.ref_type }}
+          SALLYPORT_REF_NAME: ${{ github.ref_name }}
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+        run: |
+          if [ "$SALLYPORT_EVENT" != push ] || [ "$SALLYPORT_REF_TYPE" != tag ]; then
+            echo "::error::sallyport staging runs only on tag pushes."
+            exit 1
+          fi
+          case "$SALLYPORT_REF_NAME" in
+            v[0-9]*) ;;
+            *)
+              echo "::error::Release tags must match v<package-version>."
+              exit 1
+              ;;
+          esac
+          case "$SALLYPORT_PROFILE" in
+            standard|strict) ;;
+            *)
+              echo "::error::Profile must be standard or strict."
+              exit 1
+              ;;
+          esac
+
+      - name: Check out consumer tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          path: consumer
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out sallyport
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zsumz/sallyport
+          ref: ${{ job.workflow_sha }}
+          path: sallyport
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Fetch default branch
+        working-directory: consumer
+        env:
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/remotes/origin/$SALLYPORT_DEFAULT_BRANCH"
+
+      - name: Import release signing key
+        if: inputs.profile == 'strict'
+        working-directory: consumer
+        env:
+          GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
+        run: |
+          install -d -m 700 "$GNUPGHOME"
+          gpg --batch --import etc/release-signing-key.asc
+
+      - name: Inspect source
+        id: source
+        env:
+          GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_TAG: ${{ github.ref_name }}
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
+        run: |
+          args=(
+            internal inspect-source
+            --consumer "$GITHUB_WORKSPACE/consumer"
+            --profile "$SALLYPORT_PROFILE"
+            --tag "$SALLYPORT_TAG"
+            --repository "$GITHUB_REPOSITORY"
+            --repository-id "$GITHUB_REPOSITORY_ID"
+            --default-branch "$SALLYPORT_DEFAULT_BRANCH"
+          )
+          if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
+            args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
+          fi
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
+
+      - name: Install consumer dependencies
+        working-directory: consumer
+        run: npm ci
+
+      - name: Validate consumer release
+        working-directory: consumer
+        run: npm run release:check
+
+      - name: Pack release candidate
+        id: pack
+        run: |
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal pack \
+            --consumer "$GITHUB_WORKSPACE/consumer" \
+            --output "$RUNNER_TEMP/sallyport-out"
+
+      - name: Smoke release candidate
+        env:
+          SALLYPORT_TARBALL: ${{ steps.pack.outputs.tarball }}
+          SALLYPORT_PACKAGE: ${{ steps.source.outputs.package_name }}
+          SALLYPORT_VERSION: ${{ steps.source.outputs.package_version }}
+          SALLYPORT_DIST_TAG: ${{ steps.source.outputs.dist_tag }}
+        run: |
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal smoke \
+            --consumer "$GITHUB_WORKSPACE/consumer" \
+            --tarball "$SALLYPORT_TARBALL" \
+            --package "$SALLYPORT_PACKAGE" \
+            --version "$SALLYPORT_VERSION" \
+            --dist-tag "$SALLYPORT_DIST_TAG"
+
+      - name: Create candidate receipt
+        env:
+          SALLYPORT_TARBALL: ${{ steps.pack.outputs.tarball }}
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_TAG: ${{ github.ref_name }}
+          SALLYPORT_COMMIT: ${{ github.sha }}
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
+          SALLYPORT_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          SALLYPORT_RUN_ID: ${{ github.run_id }}
+          SALLYPORT_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          if [ "$SALLYPORT_PROFILE" = strict ]; then
+            signed=true
+          else
+            signed=false
+          fi
+          args=(
+            internal create-candidate
+            --consumer "$GITHUB_WORKSPACE/consumer"
+            --tarball "$SALLYPORT_TARBALL"
+            --output "$RUNNER_TEMP/sallyport-out"
+            --profile "$SALLYPORT_PROFILE"
+            --tag "$SALLYPORT_TAG"
+            --repository "$GITHUB_REPOSITORY"
+            --repository-id "$GITHUB_REPOSITORY_ID"
+            --default-branch "$SALLYPORT_DEFAULT_BRANCH"
+            --commit "$SALLYPORT_COMMIT"
+            --signed "$signed"
+          )
+          if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
+            args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
+          fi
+          args+=(
+            --run-id "$SALLYPORT_RUN_ID"
+            --run-attempt "$SALLYPORT_RUN_ATTEMPT"
+            --sallyport-sha "$SALLYPORT_WORKFLOW_SHA"
+          )
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sallyport-candidate-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/sallyport-out/package.tgz
+            ${{ runner.temp }}/sallyport-out/candidate.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # Keep repository code outside the job that can mint an npm credential.
+  stage:
+    name: Stage candidate on npm
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm-stage
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Download release candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sallyport-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/candidate
+
+      - name: Validate candidate receipt
+        id: candidate
+        env:
+          SALLYPORT_CANDIDATE_DIR: ${{ runner.temp }}/candidate
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { createHash } from 'node:crypto';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+          const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+          const DIST_TAG = /^[a-z][a-z0-9-]*$/;
+          const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+          const COMMIT = /^[0-9a-f]{40}$/;
+          const SHA256 = /^[0-9a-f]{64}$/;
+          const SHA512 = /^[0-9a-f]{128}$/;
+          const INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/;
+          const FINGERPRINT = /^[0-9A-F]{40}$/;
+
+          const directory = process.env.SALLYPORT_CANDIDATE_DIR ?? '';
+          const problems = [];
+          const check = (ok, message) => {
+              if (!ok) {
+                  problems.push(message);
+              }
+          };
+          const fail = (message) => {
+              process.stdout.write(`::error::${message}\n`);
+              process.exit(1);
+          };
+          const section = (value) => (value !== null && typeof value === 'object' ? value : {});
+
+          let receipt;
+          try {
+              receipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
+          } catch (error) {
+              fail(`Candidate receipt is unreadable: ${error.message}`);
+          }
+          check(receipt !== null && typeof receipt === 'object', 'receipt must be a JSON object');
+          receipt = section(receipt);
+
+          const sallyport = section(receipt.sallyport);
+          const repository = section(receipt.repository);
+          const source = section(receipt.source);
+          const candidatePackage = section(receipt.package);
+          const tarball = section(receipt.tarball);
+          const run = section(receipt.run);
+
+          check(receipt.schema === 1, 'schema must be 1');
+          check(receipt.protocol === 'sallyport/0.1', 'protocol must be sallyport/0.1');
+          check(typeof sallyport.version === 'string' && sallyport.version.length > 0, 'sallyport.version must be a nonempty string');
+          check(sallyport.workflow === 'zsumz/sallyport/.github/workflows/stage.yml', 'sallyport.workflow must name the stage workflow');
+          check(typeof sallyport.sha === 'string' && COMMIT.test(sallyport.sha), 'sallyport.sha must be a 40-character commit');
+          check(typeof repository.name === 'string' && REPOSITORY.test(repository.name), 'repository.name must be owner/name');
+          check(Number.isSafeInteger(repository.id) && repository.id > 0, 'repository.id must be a positive integer');
+          check(typeof repository.defaultBranch === 'string' && repository.defaultBranch.length > 0, 'repository.defaultBranch must be a nonempty string');
+          check(typeof source.tag === 'string' && source.tag.length > 0, 'source.tag must be a nonempty string');
+          check(typeof source.commit === 'string' && COMMIT.test(source.commit), 'source.commit must be a 40-character commit');
+          check(typeof source.signed === 'boolean', 'source.signed must be a boolean');
+          check(source.signerFingerprint === null || (typeof source.signerFingerprint === 'string' && FINGERPRINT.test(source.signerFingerprint)), 'source.signerFingerprint must be null or 40 uppercase hex characters');
+          check(typeof candidatePackage.name === 'string' && PACKAGE_NAME.test(candidatePackage.name), 'package.name must be a valid npm package name');
+          check(typeof candidatePackage.version === 'string' && SEMVER.test(candidatePackage.version), 'package.version must be a valid semantic version');
+          check(candidatePackage.access === 'public', 'package.access must be public');
+          check(typeof candidatePackage.distTag === 'string' && DIST_TAG.test(candidatePackage.distTag), 'package.distTag must be a valid dist-tag');
+          check(source.tag === `v${candidatePackage.version}`, 'source.tag must be v<package.version>');
+          check(tarball.filename === 'package.tgz', 'tarball.filename must be package.tgz');
+          check(Number.isSafeInteger(tarball.bytes) && tarball.bytes > 0, 'tarball.bytes must be a positive integer');
+          check(typeof tarball.sha256 === 'string' && SHA256.test(tarball.sha256), 'tarball.sha256 must be 64 hex characters');
+          check(typeof tarball.sha512 === 'string' && SHA512.test(tarball.sha512), 'tarball.sha512 must be 128 hex characters');
+          check(typeof tarball.integrity === 'string' && INTEGRITY.test(tarball.integrity), 'tarball.integrity must be a sha512- subresource integrity value');
+          check(Number.isSafeInteger(run.id) && run.id > 0, 'run.id must be a positive integer');
+          check(Number.isSafeInteger(run.attempt) && run.attempt > 0, 'run.attempt must be a positive integer');
+
+          const tarballPath = join(directory, 'package.tgz');
+          let bytes;
+          try {
+              bytes = readFileSync(tarballPath);
+          } catch (error) {
+              fail(`Candidate tarball is unreadable: ${error.message}`);
+          }
+          const sha256 = createHash('sha256').update(bytes).digest('hex');
+          const sha512 = createHash('sha512').update(bytes).digest('hex');
+          const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+          check(bytes.byteLength === tarball.bytes, 'recomputed byte length does not match the receipt');
+          check(sha256 === tarball.sha256, 'recomputed SHA-256 does not match the receipt');
+          check(sha512 === tarball.sha512, 'recomputed SHA-512 does not match the receipt');
+          check(integrity === tarball.integrity, 'recomputed integrity does not match the receipt');
+
+          if (problems.length > 0) {
+              for (const problem of problems) {
+                  process.stdout.write(`::error::Candidate rejected: ${problem}\n`);
+              }
+              process.exit(1);
+          }
+
+          const outputs = {
+              package_name: candidatePackage.name,
+              package_version: candidatePackage.version,
+              dist_tag: candidatePackage.distTag,
+              tarball_path: tarballPath,
+              tarball_sha256: sha256,
+              signer: source.signerFingerprint === null ? 'unsigned' : source.signerFingerprint,
+          };
+          const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join('');
+          appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', lines);
+          SALLYPORT_NODE
+
+      - name: Stage package on npm
+        env:
+          SALLYPORT_TARBALL: ${{ steps.candidate.outputs.tarball_path }}
+          SALLYPORT_DIST_TAG: ${{ steps.candidate.outputs.dist_tag }}
+          SALLYPORT_STAGE_JSON: ${{ runner.temp }}/stage.json
+        run: |
+          npm stage publish \
+            "$SALLYPORT_TARBALL" \
+            --tag "$SALLYPORT_DIST_TAG" \
+            --access public \
+            --ignore-scripts \
+            --provenance \
+            --json > "$SALLYPORT_STAGE_JSON"
+
+      - name: Record stage identifier
+        id: staged
+        env:
+          SALLYPORT_STAGE_JSON: ${{ runner.temp }}/stage.json
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+
+          const STAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+          const KEYS = ['stageId', 'stage_id', 'stageID', 'id'];
+
+          let parsed = null;
+          try {
+              parsed = JSON.parse(readFileSync(process.env.SALLYPORT_STAGE_JSON ?? '', 'utf8'));
+          } catch {
+              parsed = null;
+          }
+
+          const find = (value, depth) => {
+              if (depth > 6 || value === null || typeof value !== 'object') {
+                  return null;
+              }
+              for (const key of KEYS) {
+                  const candidate = value[key];
+                  if ((typeof candidate === 'string' || typeof candidate === 'number') && STAGE_ID.test(String(candidate))) {
+                      return String(candidate);
+                  }
+              }
+              for (const nested of Object.values(value)) {
+                  const found = find(nested, depth + 1);
+                  if (found !== null) {
+                      return found;
+                  }
+              }
+              return null;
+          };
+
+          const stageId = find(parsed, 0);
+          if (stageId === null) {
+              process.stdout.write('::warning::npm reported no parsable stage identifier; recover it with npm stage list before approving.\n');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', `stage_id=${stageId ?? 'unknown'}\n`);
+          SALLYPORT_NODE
+
+      - name: Summarize staged candidate
+        env:
+          SALLYPORT_PACKAGE: ${{ steps.candidate.outputs.package_name }}
+          SALLYPORT_VERSION: ${{ steps.candidate.outputs.package_version }}
+          SALLYPORT_DIST_TAG: ${{ steps.candidate.outputs.dist_tag }}
+          SALLYPORT_SHA256: ${{ steps.candidate.outputs.tarball_sha256 }}
+          SALLYPORT_SIGNER: ${{ steps.candidate.outputs.signer }}
+          SALLYPORT_STAGE_ID: ${{ steps.staged.outputs.stage_id }}
+          SALLYPORT_RUN_ID: ${{ github.run_id }}
+        run: |
+          # shellcheck disable=SC2016 # Markdown backticks are intentional literals.
+          {
+            printf '## sallyport staged candidate\n\n'
+            printf '| Field | Value |\n'
+            printf '| --- | --- |\n'
+            printf '| Package | `%s@%s` |\n' "$SALLYPORT_PACKAGE" "$SALLYPORT_VERSION"
+            printf '| Dist-tag | `%s` |\n' "$SALLYPORT_DIST_TAG"
+            printf '| Candidate SHA-256 | `%s` |\n' "$SALLYPORT_SHA256"
+            printf '| Stage ID | `%s` |\n' "$SALLYPORT_STAGE_ID"
+            printf '| Candidate run ID | `%s` |\n' "$SALLYPORT_RUN_ID"
+            printf '| Signer | `%s` |\n' "$SALLYPORT_SIGNER"
+            printf '\n### Review, approve, then finalize\n\n'
+            printf '```sh\n'
+            printf 'npm stage view %s\n' "$SALLYPORT_STAGE_ID"
+            printf 'npm stage download %s\n' "$SALLYPORT_STAGE_ID"
+            printf 'npm stage approve %s\n' "$SALLYPORT_STAGE_ID"
+            printf 'gh workflow run sallyport.yml -f candidate_run_id=%s\n' "$SALLYPORT_RUN_ID"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"

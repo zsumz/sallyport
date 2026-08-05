@@ -1,0 +1,498 @@
+name: sallyport finalize
+
+on:
+  workflow_call:
+    inputs:
+      candidate_run_id:
+        description: Run ID of the successful staging workflow.
+        required: true
+        type: string
+      profile:
+        description: Validation profile; standard or strict.
+        required: false
+        type: string
+        default: standard
+      signer_fingerprint:
+        description: Expected OpenPGP signer fingerprint for the strict profile.
+        required: false
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify public package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Validate invocation
+        env:
+          SALLYPORT_CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+        run: |
+          case "$SALLYPORT_CANDIDATE_RUN_ID" in
+            '' | *[!0-9]*)
+              echo "::error::candidate_run_id must be a numeric workflow run ID."
+              exit 1
+              ;;
+          esac
+          case "$SALLYPORT_PROFILE" in
+            standard|strict) ;;
+            *)
+              echo "::error::Profile must be standard or strict."
+              exit 1
+              ;;
+          esac
+
+      - name: Check out sallyport
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zsumz/sallyport
+          ref: ${{ job.workflow_sha }}
+          path: sallyport
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Fetch release candidate
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SALLYPORT_CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SALLYPORT_WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal fetch-candidate \
+            --run-id "$SALLYPORT_CANDIDATE_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --sallyport-sha "$SALLYPORT_WORKFLOW_SHA" \
+            --output "$RUNNER_TEMP/sallyport-candidate"
+
+      - name: Check out consumer tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.candidate.outputs.tag }}
+          path: consumer
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch default branch
+        working-directory: consumer
+        env:
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/remotes/origin/$SALLYPORT_DEFAULT_BRANCH"
+
+      - name: Import release signing key
+        if: inputs.profile == 'strict'
+        working-directory: consumer
+        env:
+          GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
+        run: |
+          install -d -m 700 "$GNUPGHOME"
+          gpg --batch --import etc/release-signing-key.asc
+
+      - name: Reverify source
+        env:
+          GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_TAG: ${{ steps.candidate.outputs.tag }}
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
+        run: |
+          args=(
+            internal inspect-source
+            --consumer "$GITHUB_WORKSPACE/consumer"
+            --profile "$SALLYPORT_PROFILE"
+            --tag "$SALLYPORT_TAG"
+            --repository "$GITHUB_REPOSITORY"
+            --repository-id "$GITHUB_REPOSITORY_ID"
+            --default-branch "$SALLYPORT_DEFAULT_BRANCH"
+            # The version is already public here; only stage requires
+            # registry absence.
+            --mode finalize
+          )
+          if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
+            args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
+          fi
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
+
+      - name: Install consumer dependencies
+        working-directory: consumer
+        run: npm ci
+
+      - name: Verify public package
+        env:
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
+        run: |
+          args=(
+            internal verify-public
+            --consumer "$GITHUB_WORKSPACE/consumer"
+            --candidate-dir "$RUNNER_TEMP/sallyport-candidate"
+            --output "$RUNNER_TEMP/sallyport-public"
+            --profile "$SALLYPORT_PROFILE"
+          )
+          if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
+            args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
+          fi
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
+
+      - name: Build release bundle
+        env:
+          SALLYPORT_VERSION: ${{ steps.candidate.outputs.package_version }}
+        run: |
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal create-release-bundle \
+            --candidate-dir "$RUNNER_TEMP/sallyport-candidate" \
+            --release "$RUNNER_TEMP/sallyport-public/release.json" \
+            --notes "$GITHUB_WORKSPACE/consumer/docs/releases/v$SALLYPORT_VERSION.md" \
+            --output "$RUNNER_TEMP/sallyport-bundle"
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sallyport-release-${{ inputs.candidate_run_id }}
+          path: ${{ runner.temp }}/sallyport-bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  # Only this job can write repository contents; it runs no consumer code.
+  release:
+    name: Publish GitHub release
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: github-release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Download release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sallyport-release-${{ inputs.candidate_run_id }}
+          path: ${{ runner.temp }}/bundle
+
+      - name: Validate release bundle
+        id: bundle
+        env:
+          SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { createHash } from 'node:crypto';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+          const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+          const DIST_TAG = /^[a-z][a-z0-9-]*$/;
+          const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+          const COMMIT = /^[0-9a-f]{40}$/;
+          const SHA256 = /^[0-9a-f]{64}$/;
+          const SHA512 = /^[0-9a-f]{128}$/;
+          const SUM_LINE = /^([0-9a-f]{64}) [ *](.+)$/;
+          const REQUIRED_SUMS = ['package.tgz', 'candidate.json', 'release.json'];
+
+          const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
+          const problems = [];
+          const check = (ok, message) => {
+              if (!ok) {
+                  problems.push(message);
+              }
+          };
+          const fail = (message) => {
+              process.stdout.write(`::error::${message}\n`);
+              process.exit(1);
+          };
+          const section = (value) => (value !== null && typeof value === 'object' ? value : {});
+          const read = (name) => {
+              try {
+                  return readFileSync(join(directory, name));
+              } catch (error) {
+                  fail(`Release bundle file ${name} is unreadable: ${error.message}`);
+                  return Buffer.alloc(0);
+              }
+          };
+          const digest = (name) => createHash('sha256').update(read(name)).digest('hex');
+
+          let release;
+          let receipt;
+          try {
+              release = JSON.parse(read('release.json').toString('utf8'));
+              receipt = JSON.parse(read('candidate.json').toString('utf8'));
+          } catch (error) {
+              fail(`Release bundle metadata is unreadable: ${error.message}`);
+          }
+          release = section(release);
+          receipt = section(receipt);
+
+          const releasePackage = section(release.package);
+          const releaseCandidate = section(release.candidate);
+          const registry = section(release.registry);
+          const source = section(release.source);
+          const receiptPackage = section(receipt.package);
+          const receiptSource = section(receipt.source);
+
+          check(release.schema === 1, 'release.json schema must be 1');
+          check(release.protocol === 'sallyport/0.1', 'release.json protocol must be sallyport/0.1');
+          check(typeof release.candidateReceiptSha256 === 'string' && SHA256.test(release.candidateReceiptSha256), 'release.json candidateReceiptSha256 must be 64 hex characters');
+          check(typeof releasePackage.name === 'string' && PACKAGE_NAME.test(releasePackage.name), 'release.json package.name must be a valid npm package name');
+          check(typeof releasePackage.version === 'string' && SEMVER.test(releasePackage.version), 'release.json package.version must be a valid semantic version');
+          check(typeof releasePackage.distTag === 'string' && DIST_TAG.test(releasePackage.distTag), 'release.json package.distTag must be a valid dist-tag');
+          check(typeof releaseCandidate.sha256 === 'string' && SHA256.test(releaseCandidate.sha256), 'release.json candidate.sha256 must be 64 hex characters');
+          check(typeof releaseCandidate.sha512 === 'string' && SHA512.test(releaseCandidate.sha512), 'release.json candidate.sha512 must be 128 hex characters');
+          check(typeof registry.sha256 === 'string' && SHA256.test(registry.sha256), 'release.json registry.sha256 must be 64 hex characters');
+          check(typeof registry.sha512 === 'string' && SHA512.test(registry.sha512), 'release.json registry.sha512 must be 128 hex characters');
+          check(registry.integrityVerified === true, 'release.json registry.integrityVerified must be true');
+          check(registry.signatureVerified === true, 'release.json registry.signatureVerified must be true');
+          check(registry.provenanceVerified === true, 'release.json registry.provenanceVerified must be true');
+          check(typeof source.repository === 'string' && REPOSITORY.test(source.repository), 'release.json source.repository must be owner/name');
+          check(typeof source.commit === 'string' && COMMIT.test(source.commit), 'release.json source.commit must be a 40-character commit');
+          check(source.tag === `v${releasePackage.version}`, 'release.json source.tag must be v<package.version>');
+          check(source.repository === process.env.GITHUB_REPOSITORY, 'release.json source.repository must match the current repository');
+          check(receiptPackage.name === releasePackage.name, 'candidate.json package.name must match release.json');
+          check(receiptPackage.version === releasePackage.version, 'candidate.json package.version must match release.json');
+          check(receiptPackage.distTag === releasePackage.distTag, 'candidate.json package.distTag must match release.json');
+          check(receiptSource.tag === source.tag, 'candidate.json source.tag must match release.json');
+          check(receiptSource.commit === source.commit, 'candidate.json source.commit must match release.json');
+
+          const tarballSha256 = digest('package.tgz');
+          const tarballSha512 = createHash('sha512').update(read('package.tgz')).digest('hex');
+          check(tarballSha256 === releaseCandidate.sha256, 'bundled tarball does not match release.json candidate.sha256');
+          check(tarballSha512 === releaseCandidate.sha512, 'bundled tarball does not match release.json candidate.sha512');
+          check(tarballSha256 === registry.sha256, 'bundled tarball does not match the verified public SHA-256');
+          check(tarballSha512 === registry.sha512, 'bundled tarball does not match the verified public SHA-512');
+          check(digest('candidate.json') === release.candidateReceiptSha256, 'bundled candidate.json does not match release.json candidateReceiptSha256');
+          check(read('RELEASE_NOTES.md').byteLength > 0, 'RELEASE_NOTES.md must not be empty');
+
+          const listed = new Set();
+          for (const line of read('SHA256SUMS').toString('utf8').split('\n')) {
+              if (line.trim() === '') {
+                  continue;
+              }
+              const match = SUM_LINE.exec(line);
+              if (match === null) {
+                  problems.push(`SHA256SUMS line is malformed: ${line}`);
+                  continue;
+              }
+              const name = match[2].trim();
+              if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+                  problems.push(`SHA256SUMS names an unexpected path: ${name}`);
+                  continue;
+              }
+              listed.add(name);
+              check(digest(name) === match[1], `SHA256SUMS does not match the bundled ${name}`);
+          }
+          for (const name of REQUIRED_SUMS) {
+              check(listed.has(name), `SHA256SUMS must list ${name}`);
+          }
+
+          if (problems.length > 0) {
+              for (const problem of problems) {
+                  process.stdout.write(`::error::Release bundle rejected: ${problem}\n`);
+              }
+              process.exit(1);
+          }
+
+          const outputs = {
+              tag: source.tag,
+              title: `${releasePackage.name} v${releasePackage.version}`,
+              package_name: releasePackage.name,
+              package_version: releasePackage.version,
+              dist_tag: releasePackage.distTag,
+          };
+          const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join('');
+          appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', lines);
+          SALLYPORT_NODE
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
+          SALLYPORT_REPOSITORY: ${{ github.repository }}
+          SALLYPORT_TAG: ${{ steps.bundle.outputs.tag }}
+          SALLYPORT_TITLE: ${{ steps.bundle.outputs.title }}
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+          const TAG = /^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+          const ASSET_DIGEST = /^sha256:([0-9a-f]{64})$/;
+          const ASSETS = ['package.tgz', 'candidate.json', 'release.json', 'SHA256SUMS'];
+          const NOT_FOUND = /HTTP 404|Not Found/;
+
+          const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
+          const repository = process.env.SALLYPORT_REPOSITORY ?? '';
+          const tag = process.env.SALLYPORT_TAG ?? '';
+          const title = process.env.SALLYPORT_TITLE ?? '';
+
+          const fail = (message) => {
+              process.stdout.write(`::error::${message}\n`);
+              process.exit(1);
+          };
+          const note = (message) => {
+              process.stdout.write(`::notice::${message}\n`);
+              appendFileSync(process.env.GITHUB_STEP_SUMMARY ?? '/dev/stdout', `${message}\n`);
+          };
+          const gh = (args) => {
+              try {
+                  const stdout = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+                  return { ok: true, stdout, stderr: '' };
+              } catch (error) {
+                  const stdout = typeof error.stdout === 'string' ? error.stdout : '';
+                  const stderr = typeof error.stderr === 'string' ? error.stderr : String(error);
+                  return { ok: false, stdout, stderr };
+              }
+          };
+
+          if (!REPOSITORY.test(repository)) {
+              fail('The repository is not an owner/name pair.');
+          }
+          if (!TAG.test(tag)) {
+              fail('The release tag is malformed.');
+          }
+
+          const digests = new Map(ASSETS.map((name) => [
+              name,
+              createHash('sha256').update(readFileSync(join(directory, name))).digest('hex'),
+          ]));
+
+          const lookup = gh(['api', '-H', 'Accept: application/vnd.github+json', `repos/${repository}/releases/tags/${tag}`]);
+          let existing = null;
+          if (lookup.ok) {
+              existing = JSON.parse(lookup.stdout);
+          } else if (!NOT_FOUND.test(`${lookup.stdout}${lookup.stderr}`)) {
+              fail(`Unable to query the existing GitHub release: ${lookup.stderr.trim()}`);
+          }
+
+          const compare = (assets) => {
+              const conflicts = [];
+              const missing = [];
+              const present = new Set();
+              for (const asset of assets) {
+                  const name = typeof asset.name === 'string' ? asset.name : '';
+                  present.add(name);
+                  const expected = digests.get(name);
+                  if (expected === undefined) {
+                      conflicts.push(`unexpected release asset ${name}`);
+                      continue;
+                  }
+                  const match = ASSET_DIGEST.exec(typeof asset.digest === 'string' ? asset.digest : '');
+                  if (match === null) {
+                      conflicts.push(`release asset ${name} carries no SHA-256 digest`);
+                  } else if (match[1] !== expected) {
+                      conflicts.push(`release asset ${name} differs from the verified bundle`);
+                  }
+              }
+              for (const name of ASSETS) {
+                  if (!present.has(name)) {
+                      missing.push(name);
+                  }
+              }
+              return { conflicts, missing };
+          };
+
+          const upload = (names) => {
+              if (names.length === 0) {
+                  return;
+              }
+              const paths = names.map((name) => join(directory, name));
+              const result = gh(['release', 'upload', tag, ...paths, '--repo', repository, '--clobber']);
+              if (!result.ok) {
+                  fail(`Unable to upload release assets: ${result.stderr.trim()}`);
+              }
+          };
+
+          const publish = () => {
+              const result = gh(['release', 'edit', tag, '--repo', repository, '--draft=false']);
+              if (!result.ok) {
+                  fail(`Unable to publish the GitHub release: ${result.stderr.trim()}`);
+              }
+          };
+
+          if (existing === null) {
+              const created = gh([
+                  'release', 'create', tag,
+                  '--repo', repository,
+                  '--draft',
+                  '--verify-tag',
+                  '--title', title,
+                  '--notes-file', join(directory, 'RELEASE_NOTES.md'),
+              ]);
+              if (!created.ok) {
+                  fail(`Unable to create the draft GitHub release: ${created.stderr.trim()}`);
+              }
+              upload(ASSETS);
+              publish();
+              note(`Published GitHub release ${tag}.`);
+          } else {
+              const assets = Array.isArray(existing.assets) ? existing.assets : [];
+              const { conflicts, missing } = compare(assets);
+              if (existing.draft === true) {
+                  if (conflicts.length > 0) {
+                      for (const conflict of conflicts) {
+                          process.stdout.write(`::error::Draft release conflict: ${conflict}\n`);
+                      }
+                      fail(`Refusing to resume the draft release for ${tag}.`);
+                  }
+                  upload(missing);
+                  publish();
+                  note(`Resumed and published the draft GitHub release ${tag}.`);
+              } else if (conflicts.length > 0 || missing.length > 0) {
+                  for (const conflict of [...conflicts, ...missing.map((name) => `missing release asset ${name}`)]) {
+                      process.stdout.write(`::error::Published release conflict: ${conflict}\n`);
+                  }
+                  fail(`A conflicting GitHub release already exists for ${tag}.`);
+              } else {
+                  note(`GitHub release ${tag} already matches the verified bundle; nothing to publish.`);
+              }
+          }
+          SALLYPORT_NODE
