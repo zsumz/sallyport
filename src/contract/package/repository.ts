@@ -2,6 +2,8 @@ const GITHUB_URL_PATTERN =
     /^(?:https?|ssh|git):\/\/(?:[^@/]+@)?(?:www\.)?github\.com\/(.+)$/u;
 const GITHUB_SCP_PATTERN = /^(?:[^@/]+@)?github\.com:(.+)$/u;
 const GITHUB_SHORTHAND_PATTERN = /^github:(.+)$/u;
+const GITHUB_SSH_ALIAS_PATTERN =
+    /^(?:[^@/]+@)?github[-_][A-Za-z0-9._-]+:([^:/]+\/[^:/]+?)(?:\.git)?\/?$/iu;
 const REPOSITORY_SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const BARE_REPOSITORY_PATTERN = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u;
 
@@ -32,6 +34,15 @@ export function normalizeRepositoryUrl(url: string): string | null {
         return null;
     }
     return `${owner}/${name}`;
+}
+
+export function normalizeRepositoryRemote(remote: string): string | null {
+    const direct = normalizeRepositoryUrl(remote);
+    if (direct !== null) {
+        return direct;
+    }
+    const coordinates = GITHUB_SSH_ALIAS_PATTERN.exec(remote.trim())?.[1];
+    return coordinates === undefined ? null : normalizeRepositoryUrl(coordinates);
 }
 
 function githubPath(value: string): string | null {

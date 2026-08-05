@@ -1,4 +1,7 @@
-import { normalizeRepositoryUrl } from '../../contract/package.ts';
+import {
+    normalizeRepositoryRemote,
+    normalizeRepositoryUrl,
+} from '../../contract/package.ts';
 import { result, type CheckContext, type CheckResult } from './model.ts';
 
 export function packagePublicCheck(context: CheckContext): CheckResult {
@@ -68,7 +71,7 @@ export function repositoryCheck(context: CheckContext): CheckResult {
     if (declaredRepository === null) {
         return result(id, 'fail', `repository url ${declared} must identify a github.com repository.`);
     }
-    const remoteRepository = remoteRepositoryName(remote);
+    const remoteRepository = normalizeRepositoryRemote(remote);
     if (remoteRepository === null) {
         return result(id, 'fail', `git remote origin ${remote} must identify a github.com repository.`);
     }
@@ -87,16 +90,4 @@ export function scriptCheck(context: CheckContext, id: string, script: string): 
     return value === undefined || value.trim() === ''
         ? result(id, 'fail', `package.json must define the ${script} script.`)
         : result(id, 'pass', `${script} is defined.`);
-}
-
-// The declared repository url must be a real github.com reference, but the
-// local remote may go through an SSH host alias (git@github-work:owner/name).
-function remoteRepositoryName(remote: string): string | null {
-    const direct = normalizeRepositoryUrl(remote);
-    if (direct !== null) {
-        return direct;
-    }
-    const alias = /^[\w.-]+@[\w.-]+:([^:/]+\/[^:/]+?)(?:\.git)?\/?$/.exec(remote.trim());
-    const coordinates = alias?.[1];
-    return coordinates === undefined ? null : normalizeRepositoryUrl(coordinates);
 }

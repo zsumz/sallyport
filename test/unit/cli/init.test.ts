@@ -197,6 +197,16 @@ describe('runInit', () => {
             .rejects.toThrow(/must identify a github.com repository/u);
         removeTempRoot(otherRoot);
     });
+
+    it('accepts a GitHub SSH host alias', async () => {
+        const aliasRoot = makeTempRoot('init-remote-alias');
+        const bare = createConsumer(aliasRoot, {
+            remote: 'git@github-zsumz:zsumz/fake.git',
+        });
+
+        expect(await runInit(options({ dir: bare.dir }))).toBe(0);
+        removeTempRoot(aliasRoot);
+    });
 });
 
 describe('runInit --upgrade', () => {

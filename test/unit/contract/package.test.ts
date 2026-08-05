@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
     type PackageContractInput,
+    normalizeRepositoryRemote,
     normalizeRepositoryUrl,
     readPackageMetadata,
     validatePackageContract,
@@ -271,6 +272,18 @@ describe('normalizeRepositoryUrl', () => {
         for (const value of rejected) {
             expect(normalizeRepositoryUrl(value)).toBeNull();
         }
+    });
+});
+
+describe('normalizeRepositoryRemote', () => {
+    it('accepts GitHub SSH host aliases', () => {
+        expect(normalizeRepositoryRemote('git@github-zsumz:zsumz/sallyport.git'))
+            .toBe('zsumz/sallyport');
+    });
+
+    it('does not treat other forge hosts as GitHub aliases', () => {
+        expect(normalizeRepositoryRemote('git@gitlab.com:zsumz/sallyport.git'))
+            .toBeNull();
     });
 });
 

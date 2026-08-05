@@ -1,6 +1,9 @@
 import path from 'node:path';
 
-import { normalizeRepositoryUrl } from '../../contract/package.ts';
+import {
+    normalizeRepositoryRemote,
+    normalizeRepositoryUrl,
+} from '../../contract/package.ts';
 import { RELEASE_NOTES_DIRECTORY } from '../../contract/release.ts';
 import type { CommandRunner } from '../../contract/signing.ts';
 import { SIGNING_KEY_FILE } from '../check.ts';
@@ -54,7 +57,7 @@ export function detectRepository(dir: string, exec: CommandRunner): string {
             { cause: error },
         );
     }
-    const repository = url === '' ? null : normalizeRepositoryUrl(url);
+    const repository = url === '' ? null : normalizeRepositoryRemote(url);
     if (repository === null) {
         throw new Error(
             `Installation failed: git remote origin ${url} must identify a github.com repository.`,
