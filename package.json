@@ -63,12 +63,12 @@
     "prepublishOnly": "node -e \"throw new Error('Publish the qualified QUOIN_TARBALL with npm run publish:alpha.')\""
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.6.0",
     "eslint-config-rubric": "^0.1.0-alpha.0",
     "smoque": "^0.1.1",
-    "typescript": "^5.9.0",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9",
     "yaml": "^2.6.0"
   },
