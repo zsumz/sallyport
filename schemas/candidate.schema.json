@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zsumz/quoin/schemas/candidate.schema.json",
+  "title": "quoin candidate receipt",
+  "description": "Receipt describing the single authoritative release candidate produced by the quoin staging workflow.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol",
+    "quoin",
+    "repository",
+    "source",
+    "package",
+    "tarball",
+    "run"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Receipt schema version.",
+      "const": 1
+    },
+    "protocol": {
+      "description": "Release protocol identifier.",
+      "const": "quoin/0.1"
+    },
+    "quoin": {
+      "description": "Central release machinery that produced the candidate.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "workflow", "sha"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "workflow": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+/\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$"
+        },
+        "sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "repository": {
+      "description": "GitHub repository the candidate was built from.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "id", "defaultBranch"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "defaultBranch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+        }
+      }
+    },
+    "source": {
+      "description": "Tagged source commit the candidate was packed from.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "commit", "signed", "signerFingerprint"],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "signed": {
+          "type": "boolean"
+        },
+        "signerFingerprint": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9A-F]{40}$"
+        }
+      }
+    },
+    "package": {
+      "description": "Derived npm publication metadata.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "access", "distTag"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^(?:@[a-z0-9-~][a-z0-9-._~]*/)?[a-z0-9-~][a-z0-9-._~]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "access": {
+          "const": "public"
+        },
+        "distTag": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+        }
+      }
+    },
+    "tarball": {
+      "description": "Digests of the single authoritative tarball.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "bytes", "sha256", "sha512", "integrity"],
+      "properties": {
+        "filename": {
+          "const": "package.tgz"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sha512": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{128}$"
+        },
+        "integrity": {
+          "type": "string",
+          "pattern": "^sha512-[A-Za-z0-9+/]{86}==$"
+        }
+      }
+    },
+    "run": {
+      "description": "GitHub Actions run that produced the candidate artifact.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attempt"],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
