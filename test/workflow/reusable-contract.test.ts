@@ -220,10 +220,13 @@ describe('continuous integration workflow', () => {
         );
     });
 
-    it('validates the supported Node versions and gates coverage', () => {
+    it('validates workflows, supported Node versions, and coverage', () => {
         const workflow = readWorkflow('ci.yml');
-        expect(Object.keys(workflow.jobs ?? {})).toEqual(['validate', 'coverage']);
+        expect(Object.keys(workflow.jobs ?? {})).toEqual(['workflows', 'validate', 'coverage']);
         const scripts = allSteps(workflow).map((step) => step.run ?? '').join('\n');
+        expect(scripts).toContain('ACTIONLINT_SHA256');
+        expect(scripts).toContain('sha256sum --check');
+        expect(scripts).toContain('"$RUNNER_TEMP/actionlint"');
         expect(scripts).toContain('npm run validate');
         expect(scripts).toContain('npm run coverage:check');
         const versions = allSteps(workflow)

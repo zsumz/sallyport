@@ -193,8 +193,15 @@ describe('reusable workflow privilege boundaries', () => {
                 (step) => step.with?.repository === 'zsumz/quoin',
             );
             expect(quoinCheckout).toBeDefined();
-            expect(quoinCheckout?.with?.ref).toBe('${{ github.job_workflow_sha }}');
+            expect(quoinCheckout?.with?.ref).toBe('${{ job.workflow_sha }}');
             expect(quoinCheckout?.with?.['persist-credentials']).toBe(false);
+        }
+    });
+
+    it('never uses the nonexistent github.job_workflow_sha property', () => {
+        for (const file of ['stage.yml', 'finalize.yml'] as const) {
+            expect(readFileSync(`${workflowDirectory}${file}`, 'utf8'))
+                .not.toContain('github.job_workflow_sha');
         }
     });
 
