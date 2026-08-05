@@ -1,0 +1,70 @@
+{
+  "name": "quoin",
+  "version": "0.1.0-alpha.0",
+  "description": "A reusable, staged npm release protocol for GitHub Actions with a tiny installer CLI.",
+  "author": "zsumz <shawn@zsumz.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zsumz/quoin.git"
+  },
+  "homepage": "https://github.com/zsumz/quoin#readme",
+  "bugs": {
+    "url": "https://github.com/zsumz/quoin/issues"
+  },
+  "type": "module",
+  "bin": {
+    "quoin": "dist/cli/main.js"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "templates/",
+    "schemas/"
+  ],
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "keywords": [
+    "npm",
+    "publish",
+    "release",
+    "staged-publishing",
+    "trusted-publishing",
+    "provenance",
+    "supply-chain",
+    "github-actions",
+    "ci"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rm -rf dist coverage",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json",
+    "lint": "eslint src test",
+    "test": "npm run build && vitest run",
+    "coverage": "npm run build && vitest run --coverage",
+    "coverage:check": "npm run build && QUOIN_COVERAGE_CHECK=1 vitest run --coverage",
+    "smoke": "npm run build && smoque run smoke/ --ci",
+    "smoke:list": "smoque list smoke/",
+    "validate": "npm run typecheck && npm run lint && npm test && npm pack --dry-run --json",
+    "release:check": "npm run validate && npm run coverage:check",
+    "release:smoke": "smoque run smoke/ --ci",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "eslint": "^10.6.0",
+    "eslint-config-rubric": "^0.1.0-alpha.0",
+    "smoque": "^0.1.1",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.9",
+    "yaml": "^2.6.0"
+  },
+  "license": "MIT"
+}
