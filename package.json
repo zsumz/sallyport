@@ -58,9 +58,8 @@
     "validate": "npm run typecheck && npm run lint && npm run architecture:check && npm test && npm pack --dry-run --json",
     "release:check": "npm run validate && npm run coverage:check",
     "release:smoke": "smoque run smoke/ --ci",
-    "publish:alpha": "node scripts/release/publish-alpha.mts",
     "prepack": "npm run build",
-    "prepublishOnly": "node -e \"throw new Error('Publish the qualified SALLYPORT_TARBALL with npm run publish:alpha.')\""
+    "prepublishOnly": "node -e \"throw new Error('Publish sallyport only through .github/workflows/sallyport.yml.')\""
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

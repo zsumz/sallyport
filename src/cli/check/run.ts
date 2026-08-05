@@ -6,6 +6,7 @@ import {
     repositoryCheck,
     scriptCheck,
 } from './package.ts';
+import { runRemoteChecks } from './remote.ts';
 import { directPublishCheck, npmTokenCheck } from './security.ts';
 import {
     callerWorkflowCheck,
@@ -31,5 +32,11 @@ export async function runCheck(options: CheckOptions): Promise<CheckReport> {
         npmTokenCheck(context),
         directPublishCheck(context),
     ];
-    return { checks, ok: checks.every((check) => check.status !== 'fail') };
+    if (options.remote === true) {
+        checks.push(...runRemoteChecks(context, options));
+    }
+    return {
+        checks,
+        ok: checks.every((check) => check.status !== 'fail' && check.status !== 'unverified'),
+    };
 }

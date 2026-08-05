@@ -147,8 +147,8 @@ control plane is outside the model.
 configuration require the package to already exist, so a brand-new package
 needs one manual, 2FA-authenticated publication before sallyport can take over.
 That first version is published outside the protocol and gets none of its
-guarantees. See [releasing](./releasing.md) for how sallyport handles its
-own bootstrap.
+guarantees. sallyport contains no reusable bootstrap publisher; its own
+historical bootstrap is recorded in [releasing](./releasing.md).
 
 **Out-of-scope configurations.** v0.1.0 covers public packages on public
 GitHub repositories, GitHub-hosted Linux runners, and npm. Workspaces, private

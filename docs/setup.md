@@ -89,6 +89,7 @@ publish, and no long-lived npm credential exists anywhere.
 Documented, not mutated by v0.1.0. Confirm each:
 
 - protected default branch
+- pull requests required
 - required CI
 - signed commits (strict repositories)
 - linear history
@@ -125,6 +126,24 @@ For CI or scripting:
 ```sh
 npx sallyport@alpha check --json
 ```
+
+Audit the external settings after authenticating `gh` and npm:
+
+```sh
+npx sallyport@alpha check --remote
+```
+
+The remote pass adds checks for both GitHub environments, stage-only npm
+trust, npm publishing MFA, immutable Releases, the signer variable, and the
+default-branch and `v*` rulesets. It is read-only. An unavailable or
+unauthenticated setting is `UNVERIFIED`, never `PASS`, and makes the command
+exit nonzero.
+
+npm currently has no supported CLI readback for the package-level "require MFA
+and disallow tokens" setting. Until it does, that line is `UNVERIFIED`; confirm
+it manually on the package settings page. If `npm trust list` requests a second
+factor, rerun with a current code in `npm_config_otp` so sallyport can verify the
+trusted publisher without storing a credential.
 
 ## Upgrading
 

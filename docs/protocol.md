@@ -30,8 +30,10 @@ must fail closed rather than continue.
   conventional-commit changelog generation.
 
 Trusted publishing requires a supported cloud-hosted runner; self-hosted
-runners are unsupported. Staged publishing requires Node `22.14` or newer and
-npm `11.15` or newer.
+runners are unsupported. The local CLI supports Node `22.18.0` and newer.
+Credential-bearing release jobs use exactly Node `24.19.0` and npm `11.17.0`.
+npm's lower staged-publishing floor, Node `22.14` with npm `11.15`, is not a
+qualified sallyport workflow toolchain.
 
 ## 2. The consumer repository contract
 
@@ -256,7 +258,8 @@ Only unprivileged jobs ever check out sallyport implementation code.
 and the npm bundled with it, `11.17.0`. It then asserts the observed
 `node --version` and `npm --version`. There must be no `24.x` range, no
 `npm@latest`, and no runtime global npm upgrade in the credential-bearing job.
-npm must satisfy the staged-publishing requirement of `11.15` or newer.
+The pinned versions exceed npm's staged-publishing floor; that floor is not an
+alternative supported workflow toolchain.
 
 **Step D — verify package metadata.** The package name must exist; `private`
 must not be `true`; the version must be valid SemVer; the tag must be exactly

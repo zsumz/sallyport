@@ -34,6 +34,9 @@ npx sallyport@alpha check
 `init` writes a caller workflow pinned to the installed sallyport commit. `check`
 audits the release setup without changing it.
 
+Use `check --remote` to audit GitHub and npm posture. Missing proof is
+`UNVERIFIED`, never `PASS`.
+
 ## Model
 
 ```text
@@ -78,8 +81,9 @@ gh workflow run sallyport.yml -f candidate_run_id=<run-id>
 
 ## Support
 
-Public, single-package npm repositories on GitHub-hosted Linux runners. npm,
-a root `package-lock.json`, and Node `22.18.0` or newer are required.
+Public, single-package npm repositories on GitHub-hosted Linux runners. Running
+the CLI requires Node `22.18.0` or newer and a root `package-lock.json`. Release
+workflows use the exact Node `24.19.0` / npm `11.17.0` toolchain.
 
 ## Development
 

@@ -1,7 +1,12 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runCli, USAGE } from '../../../src/cli/dispatch.ts';
+import {
+    CHECK_USAGE,
+    INIT_USAGE,
+    runCli,
+    USAGE,
+} from '../../../src/cli/dispatch.ts';
 import { CALLER_WORKFLOW_FILE } from '../../../src/cli/template.ts';
 import { readsallyportVersion } from '../../../src/cli/version.ts';
 import {
@@ -39,8 +44,23 @@ describe('runCli', () => {
             expect(await runCli([flag], harness.effects)).toBe(0);
         }
         expect(harness.logs).toEqual([USAGE, USAGE, USAGE]);
-        expect(USAGE).toContain('sallyport init [--strict] [--upgrade] [--force] [--sha <40-hex>]');
-        expect(USAGE).toContain('sallyport check [--json]');
+        expect(USAGE).toContain('sallyport init [options]');
+        expect(USAGE).toContain('sallyport check [options]');
+    });
+
+    it('prints command-specific help without running the command', async () => {
+        for (const flag of ['--help', '-h', 'help']) {
+            expect(await runCli(['init', flag], harness.effects)).toBe(0);
+            expect(await runCli(['check', flag], harness.effects)).toBe(0);
+        }
+
+        expect(harness.logs).toEqual([
+            INIT_USAGE, CHECK_USAGE,
+            INIT_USAGE, CHECK_USAGE,
+            INIT_USAGE, CHECK_USAGE,
+        ]);
+        expect(INIT_USAGE).toContain('--strict');
+        expect(CHECK_USAGE).toContain('--remote');
     });
 
     it('prints the package version for every version spelling', async () => {

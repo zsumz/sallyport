@@ -1,5 +1,6 @@
 import { hasFlag, optionalValue, parseArgv } from './args.ts';
 import { formatCheckReport, runCheck } from './check.ts';
+import { CHECK_USAGE, INIT_USAGE, isHelpRequest, USAGE } from './help.ts';
 import { runInit } from './init.ts';
 import { createCandidateCommand } from './internal/create-candidate.ts';
 import { createReleaseBundleCommand } from './internal/create-release-bundle.ts';
@@ -11,28 +12,7 @@ import { smokeCommand } from './internal/smoke.ts';
 import { verifyPublicCommand } from './internal/verify-public.ts';
 import { readsallyportVersion } from './version.ts';
 
-export const USAGE = [
-    'sallyport — a reusable, staged npm release protocol for GitHub Actions.',
-    '',
-    'Usage:',
-    '  sallyport init [--strict] [--upgrade] [--force] [--sha <40-hex>]',
-    '  sallyport check [--json]',
-    '  sallyport --version',
-    '  sallyport --help',
-    '',
-    'init   Generate .github/workflows/sallyport.yml, print the npm trust command',
-    '       and the one-time setup checklist, then run check.',
-    '         --strict   require signed tags; also create docs/releases/ and etc/',
-    '         --upgrade  rewrite only the two pinned reusable-workflow commits',
-    '         --force    upgrade a caller workflow that lost its generated-by marker',
-    '         --sha      pin both reusable workflows to this sallyport commit',
-    '',
-    'check  Verify local release readiness; one PASS/FAIL/SKIP line per assertion.',
-    '         --json     print { checks, ok } instead of text',
-    '       Exits 1 when any assertion fails.',
-    '',
-    'internal <command>  Reserved for the reusable workflows; not a public API.',
-].join('\n');
+export { CHECK_USAGE, INIT_USAGE, USAGE } from './help.ts';
 
 const INTERNAL_COMMANDS = [
     'inspect-source',
@@ -74,6 +54,10 @@ async function initCommand(
     argv: readonly string[],
     effects: CliEffects,
 ): Promise<number> {
+    if (isHelpRequest(argv)) {
+        effects.log(INIT_USAGE);
+        return 0;
+    }
     const parsed = parseArgv(argv, {
         booleans: ['strict', 'upgrade', 'force'],
         strings: ['sha'],
@@ -93,8 +77,17 @@ async function checkCommand(
     argv: readonly string[],
     effects: CliEffects,
 ): Promise<number> {
-    const parsed = parseArgv(argv, { booleans: ['json'] });
-    const report = await runCheck({ dir: effects.cwd, exec: effects.exec });
+    if (isHelpRequest(argv)) {
+        effects.log(CHECK_USAGE);
+        return 0;
+    }
+    const parsed = parseArgv(argv, { booleans: ['json', 'remote'] });
+    const report = await runCheck({
+        dir: effects.cwd,
+        exec: effects.exec,
+        env: effects.env,
+        remote: hasFlag(parsed, 'remote'),
+    });
     effects.log(hasFlag(parsed, 'json')
         ? JSON.stringify(report, null, 2)
         : formatCheckReport(report).trimEnd());
