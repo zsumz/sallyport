@@ -184,7 +184,7 @@ function receiptSummary(receipt: CandidateReceipt, profile: Profile): string {
         `| Candidate SHA-256 | \`${receipt.tarball.sha256}\` |`,
         `| Candidate bytes | ${String(receipt.tarball.bytes)} |`,
         `| Integrity | \`${receipt.tarball.integrity}\` |`,
-        `| Quoin | \`${receipt.quoin.version}\` @ \`${receipt.quoin.sha}\` |`,
+        `| quoin | \`${receipt.quoin.version}\` @ \`${receipt.quoin.sha}\` |`,
         `| Candidate run | ${String(receipt.run.id)} (attempt ${String(receipt.run.attempt)}) |`,
         '',
     ].join('\n');

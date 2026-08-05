@@ -18,10 +18,13 @@
   "files": [
     "LICENSE",
     "README.md",
+    "SECURITY.md",
+    "quoin-logo.svg",
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "templates/",
-    "schemas/"
+    "schemas/",
+    "docs/"
   ],
   "packageManager": "npm@11.17.0",
   "engines": {

@@ -1,6 +1,6 @@
 # Setting up a consumer repository
 
-One-time setup per package. Quoin never mutates repository settings; every
+One-time setup per package. quoin never mutates repository settings; every
 step below is performed by a maintainer. See [protocol](./protocol.md) for
 what each setting protects.
 
@@ -16,7 +16,7 @@ npx quoin init --strict
 repository, verifies that this is one root public package, checks for the
 `release:check` and `release:smoke` scripts, and generates
 `.github/workflows/quoin.yml` with both reusable workflows pinned to the
-exact Quoin commit associated with the installed CLI. With `--strict` it
+exact quoin commit associated with the installed CLI. With `--strict` it
 also creates the `docs/releases/` and `etc/` directories, prints the npm trust
 command and the environment checklist, and finishes by running
 `quoin check`.
@@ -56,7 +56,7 @@ QUOIN_SIGNER_FINGERPRINT=<40-hex-fingerprint>
 ```
 
 Commit the matching public key to `etc/release-signing-key.asc`. The primary
-key fingerprint is the authorization boundary; Quoin does not check signer
+key fingerprint is the authorization boundary; quoin does not check signer
 name or email.
 
 ## 4. npm trusted publisher

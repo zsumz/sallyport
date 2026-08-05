@@ -13,14 +13,14 @@ A malicious dependency, build script, test, or smoke script runs inside the
 release pipeline. It is the most likely compromise, because package code
 executes on every release by definition.
 
-Quoin splits authority so that package code never holds any.
+quoin splits authority so that package code never holds any.
 
 `prepare` runs package code — `npm ci`, `release:check`, the pack, and
 `release:smoke` — with `contents: read` only. It has no OIDC token, no write
 permission, and no secrets. Nothing it produces can publish.
 
 `stage` holds the OIDC credential and runs no package code at all: no caller
-checkout, no Quoin checkout, no `npm ci`, no `npm run`, no local Actions, no
+checkout, no quoin checkout, no `npm ci`, no `npm run`, no local Actions, no
 cache restoration, no inherited secrets. It validates the candidate receipt
 with embedded dependency-free code, verifies the candidate digest, and invokes
 `npm stage publish` as an argument array built only from validated values.
@@ -48,10 +48,10 @@ Invariants 1 and 5.
 
 ### Tarball tampered between validation and publication
 
-The classic gap: what was tested is not what was shipped. Quoin closes it by
+The classic gap: what was tested is not what was shipped. quoin closes it by
 never producing a second tarball.
 
-The candidate is packed exactly once, by Quoin, with `--ignore-scripts`. Its
+The candidate is packed exactly once, by quoin, with `--ignore-scripts`. Its
 SHA-256, SHA-512, SRI integrity, and byte length are recorded immediately, and
 the packed manifest is revalidated from inside the archive. `release:smoke`
 receives a **copy**; the authoritative `package.tgz` is never handed to package
@@ -64,14 +64,14 @@ Invariant 4.
 
 ### Compromised update to the central workflows
 
-Quoin is shared machinery, so a malicious change to it would otherwise reach
+quoin is shared machinery, so a malicious change to it would otherwise reach
 every consumer at once.
 
 Consumers never reference a branch or a tag. The generated caller pins both
 `stage.yml` and `finalize.yml` to the same full 40-character commit SHA, and
 `quoin check` fails if the two SHAs differ or if either is not a full
 SHA. Upgrading is an explicit, atomic, reviewable commit produced by
-`quoin init --upgrade`. A new Quoin commit reaches a consumer only when
+`quoin init --upgrade`. A new quoin commit reaches a consumer only when
 that consumer merges it.
 
 The same rule applies to third-party Actions used inside the reusable
@@ -123,19 +123,19 @@ Invariants 3, 4, and 10.
 
 ## Not defended
 
-These are real risks that Quoin does not mitigate. Do not read the
+These are real risks that quoin does not mitigate. Do not read the
 invariants as covering them.
 
 **Compromised maintainer 2FA.** Human approval is the last gate before a
 package becomes public, and it is also the only one. An attacker who controls
 the maintainer's npm account and second factor can approve a staged candidate.
-Quoin reduces what CI can do; it cannot reduce what an authenticated
+quoin reduces what CI can do; it cannot reduce what an authenticated
 maintainer can do.
 
-**Malicious source that is legitimately signed.** Quoin proves that the
+**Malicious source that is legitimately signed.** quoin proves that the
 published bytes came from a specific signed tag, packed once, and verified end
 to end. It does not prove the source is benign. A strict-profile signature by
-the configured fingerprint authorizes the release; code review, not Quoin,
+the configured fingerprint authorizes the release; code review, not quoin,
 decides whether the code deserves it.
 
 **GitHub or npm platform compromise.** The protocol trusts GitHub Actions to
@@ -145,7 +145,7 @@ control plane is outside the model.
 
 **The bootstrap publication.** Staged publishing and trusted-publisher
 configuration require the package to already exist, so a brand-new package
-needs one manual, 2FA-authenticated publication before Quoin can take over.
+needs one manual, 2FA-authenticated publication before quoin can take over.
 That first version is published outside the protocol and gets none of its
 guarantees. See [releasing](./releasing.md) for how quoin handles its
 own bootstrap.

@@ -9,7 +9,7 @@ exception, because the protocol cannot bootstrap itself.
 
 Staged publishing and trusted-publisher configuration both require the npm
 package to already exist, so a completely new package needs one initial
-publication outside the protocol. That publication gets none of Quoin's
+publication outside the protocol. That publication gets none of quoin's
 guarantees; see
 [threat model](./threat-model.md#not-defended).
 
@@ -113,7 +113,7 @@ they are — they are the workflows the caller calls.
 
 ### 7. Release 0.1.1 through the protocol
 
-`0.1.1` is the first self-hosted Quoin release. From here, follow the
+`0.1.1` is the first self-hosted quoin release. From here, follow the
 sections below.
 
 ## One-time setup

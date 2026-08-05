@@ -35,7 +35,7 @@ npm `11.15` or newer.
 
 ## 2. The consumer repository contract
 
-A consumer repository contains only these Quoin-relevant files:
+A consumer repository contains only these quoin-relevant files:
 
 ```text
 .github/workflows/quoin.yml
@@ -58,28 +58,28 @@ Runs against the tagged source tree. The script must:
 
 The script must require no credentials or secrets. It must never publish or
 stage anything, and must never modify package versions. It must never depend
-on npm lifecycle hooks running during the final pack, because Quoin packs
+on npm lifecycle hooks running during the final pack, because quoin packs
 with `--ignore-scripts`.
 
-Quoin runs:
+quoin runs:
 
 ```sh
 npm ci
 npm run release:check
 ```
 
-Quoin then performs the one authoritative release pack:
+quoin then performs the one authoritative release pack:
 
 ```sh
 npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/quoin"
 ```
 
-The release candidate is packed exactly once, by Quoin, and reused from then
+The release candidate is packed exactly once, by quoin, and reused from then
 onward.
 
 ### `release:smoke`
 
-Quoin runs `npm run release:smoke` with the exact candidate identified by
+quoin runs `npm run release:smoke` with the exact candidate identified by
 environment variables:
 
 ```text
@@ -97,7 +97,7 @@ The script must:
   contracts.
 
 The script must never repack the repository, never publish, and never modify
-the supplied tarball. Quoin provides a copy of the tarball and verifies that
+the supplied tarball. quoin provides a copy of the tarball and verifies that
 copy's hash afterward. This is the only package-specific part of the release
 system.
 
@@ -193,7 +193,7 @@ is the authorization boundary.
 
 ## 5. Dist-tag policy
 
-The consumer never supplies a raw publishing tag. Quoin derives it from the
+The consumer never supplies a raw publishing tag. quoin derives it from the
 version:
 
 ```text
@@ -210,7 +210,7 @@ Rules:
 - The first prerelease identifier must be a nonnumeric, valid npm dist-tag:
   lowercase, starting with a letter, containing only letters, digits, and
   hyphens.
-- Quoin must reject ambiguous forms such as `1.0.0-1`, identifiers that
+- quoin must reject ambiguous forms such as `1.0.0-1`, identifiers that
   parse as version ranges (`v2`, `1e5`, `x`), and the reserved identifier
   `latest` — a prerelease must never move `latest`.
 - Versions carrying build metadata (`1.0.0+build`) are not releasable.
@@ -249,9 +249,9 @@ $GITHUB_WORKSPACE/consumer
 $GITHUB_WORKSPACE/quoin
 ```
 
-Only unprivileged jobs ever check out Quoin implementation code.
+Only unprivileged jobs ever check out quoin implementation code.
 
-**Step C — establish the qualified toolchain.** Quoin v0.1.0 pins the
+**Step C — establish the qualified toolchain.** quoin v0.1.0 pins the
 `ubuntu-24.04` runner family, exact `actions/*` commit SHAs, Node `24.19.0`,
 and the npm bundled with it, `11.17.0`. It then asserts the observed
 `node --version` and `npm --version`. There must be no `24.x` range, no
@@ -271,13 +271,13 @@ required release notes must exist.
 `npm run release:check`. No secrets are present.
 
 **Step F — pack once.** `npm pack --ignore-scripts --json`, renaming the
-artifact to the fixed safe name `package.tgz`. Quoin then reads the packed
+artifact to the fixed safe name `package.tgz`. quoin then reads the packed
 `package/package.json`, revalidates name and version from inside the tarball,
 records packed file metadata, and computes SHA-256, SHA-512, npm SRI
 integrity, and byte length. Unsafe archive paths and malformed metadata must
 be rejected.
 
-**Step G — smoke the exact candidate.** Quoin copies
+**Step G — smoke the exact candidate.** quoin copies
 `package.tgz → smoke-package.tgz`, sets the `QUOIN_*` environment
 contract, runs `npm run release:smoke`, and verifies by hash that the copy was
 not modified. The authoritative `package.tgz` is never handed to package code
@@ -305,7 +305,7 @@ must contain exactly `package.tgz` and `candidate.json`. Retention is 90 days.
 
 Permissions: `id-token: write`. Environment: `npm-stage`.
 
-This job has no caller checkout, no Quoin checkout, no `npm ci`, no package
+This job has no caller checkout, no quoin checkout, no `npm ci`, no package
 scripts, no local Actions, no cache, no inherited secrets, no npm token, no
 repository write permission, and no shell command assembled from unvalidated
 package values.

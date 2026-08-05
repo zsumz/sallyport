@@ -17,7 +17,7 @@ smoke.suite('quoin package', { tags: ['package'] }, async (t) => {
         await t.tools.npm({ minVersion: 10 });
     });
 
-    // Inside a Quoin release the exact candidate tarball arrives through
+    // Inside a quoin release the exact candidate tarball arrives through
     // the environment; everywhere else the smoke packs its own fixture.
     const suppliedTarball = process.env.QUOIN_TARBALL;
     const tarball = suppliedTarball !== undefined && suppliedTarball !== ''
@@ -45,14 +45,20 @@ smoke.suite('quoin package', { tags: ['package'] }, async (t) => {
     const version = process.env.QUOIN_VERSION
         ?? JSON.parse(readFileSync(root.path('package.json'), 'utf8')).version;
 
-    await t.step('tarball contains the CLI, templates, and schemas', async () => {
+    await t.step('tarball contains the public package surface', async () => {
         await expect
             .archive(tarball)
             .toContainEntries([
                 'package/LICENSE',
                 'package/README.md',
+                'package/SECURITY.md',
+                'package/quoin-logo.svg',
                 'package/dist/cli/main.js',
                 'package/dist/cli/pins.js',
+                'package/docs/protocol.md',
+                'package/docs/recovery.md',
+                'package/docs/setup.md',
+                'package/docs/threat-model.md',
                 'package/schemas/candidate.schema.json',
                 'package/schemas/release.schema.json',
                 'package/templates/quoin.yml',
@@ -60,13 +66,12 @@ smoke.suite('quoin package', { tags: ['package'] }, async (t) => {
             ]);
     });
 
-    await t.step('tarball excludes sources, tests, docs, and workflows', async () => {
+    await t.step('tarball excludes sources, tests, and workflows', async () => {
         await expect
             .archive(tarball)
             .not.toContainEntries([
                 'package/src/cli/main.ts',
                 'package/test/tsconfig.json',
-                'package/docs/protocol.md',
                 'package/.github/workflows/stage.yml',
                 'package/vitest.config.ts',
                 'package/eslint.config.mjs',
