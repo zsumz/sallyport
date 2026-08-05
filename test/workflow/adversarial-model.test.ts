@@ -73,6 +73,20 @@ describe('adversarial release model', () => {
         }
     });
 
+    it('only sealed candidate bytes can satisfy the smoke required by staging', () => {
+        const smoke = job('stage.yml', 'candidate_smoke');
+        const stage = job('stage.yml', 'stage');
+        expect(smoke.needs).toBe('seal');
+        expect(action('stage.yml', 'candidate_smoke', 'actions/download-artifact')
+            .with?.['artifact-ids'])
+            .toBe('${{ needs.seal.outputs.candidate_artifact_id }}');
+        expect(scripts('stage.yml', 'candidate_smoke')).toContain('internal smoke');
+        expect((smoke.steps ?? []).some((step) => (step.uses ?? '').includes('upload-artifact')))
+            .toBe(false);
+        expect(smoke.outputs).toBeUndefined();
+        expect(stage.needs).toEqual(['seal', 'candidate_smoke']);
+    });
+
     it('consumer smoke cannot replace the clean finalizer bundle', () => {
         const core = job('finalize.yml', 'verify_core');
         const smoke = job('finalize.yml', 'public_smoke');

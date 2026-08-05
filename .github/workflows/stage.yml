@@ -111,7 +111,6 @@ jobs:
           gpg --batch --import etc/release-signing-key.asc
 
       - name: Inspect source
-        id: source
         env:
           GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
           SALLYPORT_PROFILE: ${{ inputs.profile }}
@@ -143,25 +142,10 @@ jobs:
         run: npm run release:check
 
       - name: Pack release candidate
-        id: pack
         run: |
           node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal pack \
             --consumer "$GITHUB_WORKSPACE/consumer" \
             --output "$RUNNER_TEMP/sallyport-out"
-
-      - name: Smoke release candidate
-        env:
-          SALLYPORT_TARBALL: ${{ steps.pack.outputs.tarball }}
-          SALLYPORT_PACKAGE: ${{ steps.source.outputs.package_name }}
-          SALLYPORT_VERSION: ${{ steps.source.outputs.package_version }}
-          SALLYPORT_DIST_TAG: ${{ steps.source.outputs.dist_tag }}
-        run: |
-          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal smoke \
-            --consumer "$GITHUB_WORKSPACE/consumer" \
-            --tarball "$SALLYPORT_TARBALL" \
-            --package "$SALLYPORT_PACKAGE" \
-            --version "$SALLYPORT_VERSION" \
-            --dist-tag "$SALLYPORT_DIST_TAG"
 
       - name: Upload unsealed tarball
         id: upload
@@ -321,10 +305,99 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  # Package code runs only after a fresh runner has sealed the authoritative bytes.
+  candidate_smoke:
+    name: Smoke sealed candidate
+    needs: seal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out exact consumer commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: consumer
+          persist-credentials: false
+
+      - name: Check out sallyport
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zsumz/sallyport
+          ref: ${{ job.workflow_sha }}
+          path: sallyport
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Download sealed candidate by ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.seal.outputs.candidate_artifact_id }}
+          path: ${{ runner.temp }}/candidate
+
+      - name: Read sealed candidate identity
+        env:
+          SALLYPORT_CANDIDATE: ${{ runner.temp }}/candidate/candidate.json
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+
+          const receipt = JSON.parse(readFileSync(process.env.SALLYPORT_CANDIDATE, 'utf8'));
+          const candidatePackage = receipt?.package;
+          const values = {
+              SALLYPORT_PACKAGE: candidatePackage?.name,
+              SALLYPORT_VERSION: candidatePackage?.version,
+              SALLYPORT_DIST_TAG: candidatePackage?.distTag,
+          };
+          for (const [name, value] of Object.entries(values)) {
+              if (typeof value !== 'string' || value === '' || value.includes('\n')) {
+                  throw new Error(`candidate.json has an invalid ${name}`);
+              }
+              appendFileSync(process.env.GITHUB_ENV ?? '/dev/stdout', `${name}=${value}\n`);
+          }
+          SALLYPORT_NODE
+
+      - name: Install consumer dependencies
+        working-directory: consumer
+        run: npm ci
+
+      - name: Smoke sealed candidate
+        env:
+          SALLYPORT_TARBALL: ${{ runner.temp }}/candidate/package.tgz
+        run: |
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal smoke \
+            --consumer "$GITHUB_WORKSPACE/consumer" \
+            --tarball "$SALLYPORT_TARBALL" \
+            --package "$SALLYPORT_PACKAGE" \
+            --version "$SALLYPORT_VERSION" \
+            --dist-tag "$SALLYPORT_DIST_TAG"
+
   # Keep repository code outside the job that can mint an npm credential.
   stage:
     name: Stage candidate on npm
-    needs: seal
+    needs: [seal, candidate_smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: npm-stage

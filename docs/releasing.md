@@ -74,8 +74,9 @@ git push origin v<version>
 
 The caller's `prepare` job runs the package gate and emits only a tarball. A
 fresh `seal` job rebinds the tag, commit, signer, branch, manifest, and digests
-before authoring the receipt. The OIDC job downloads that sealed artifact by ID
-and stages it. It cannot publish directly.
+before authoring the receipt. An output-free job smokes that sealed artifact by
+ID. Only then may the OIDC job download the seal job's artifact ID and stage it.
+It cannot publish directly.
 
 Note the stage ID and the candidate run ID from the staging summary.
 

@@ -49,6 +49,10 @@ etc/release-signing-key.asc       # strict profile only
 
 and two npm scripts: `release:check` and `release:smoke`.
 
+For remote posture audits, `package.json` also declares the exact GitHub
+Actions job names in `sallyport.requiredStatusChecks`. This policy is reviewed
+with the repository and compared exactly with the default-branch ruleset.
+
 ### `release:check`
 
 Runs against the tagged source tree. The script must:
@@ -224,12 +228,13 @@ Rules:
 
 ## 6. Stage flow — `stage.yml`
 
-Three jobs:
+Four jobs:
 
 ```text
-prepare ─────> seal ─────> stage
-package code    clean        npm OIDC
-no authority    receipt      no package code
+prepare ─────> seal ─────────────> stage
+package code    clean receipt      npm OIDC
+no authority        └─> candidate_smoke ─┘
+                        exact bytes; no authority
 ```
 
 ### Job 1: `prepare`
@@ -280,12 +285,6 @@ required release notes must exist.
 artifact to the fixed safe name `package.tgz`. This is an untrusted byte output;
 the fresh `seal` job performs the authoritative manifest inspection and digest.
 
-**Step G — smoke the emitted candidate.** sallyport copies
-`package.tgz → smoke-package.tgz`, sets the `SALLYPORT_*` environment
-contract, runs `npm run release:smoke`, and verifies by hash that the copy was
-not modified during the smoke. This is useful package behavior evidence, not a
-trusted assertion about the bytes; only `seal` can make them authoritative.
-
 `prepare` uploads only `package.tgz`. Its artifact ID, not its name, is handed
 to the next job. No metadata written by package code is trusted.
 
@@ -317,9 +316,19 @@ authoritative candidate receipt (`candidate.json`):
 The sealed artifact is named
 `sallyport-candidate-<tag-commit-sha>-<run-attempt>`, contains exactly
 `package.tgz` and `candidate.json`, and is retained for 90 days. Its immutable
-artifact ID is handed to `stage`.
+artifact ID is handed to `candidate_smoke` and `stage`.
 
-### Job 3: `stage`
+### Job 3: `candidate_smoke`
+
+Permissions: `actions: read`, `contents: read`. No OIDC or write access.
+
+This job downloads the sealed candidate by immutable artifact ID, checks out
+the exact consumer and sallyport commits, installs dependencies, and runs
+`release:smoke` against a copy of the sealed `package.tgz`. sallyport verifies
+that the copy was not modified. The job uploads nothing and exposes no output;
+only its success is consumed by `stage`.
+
+### Job 4: `stage`
 
 Permissions: `id-token: write`. Environment: `npm-stage`.
 
@@ -328,7 +337,8 @@ scripts, no local Actions, no cache, no inherited secrets, no npm token, no
 repository write permission, and no shell command assembled from unvalidated
 package values.
 
-It downloads only the sealed artifact ID. Embedded dependency-free Node code
+It waits for `candidate_smoke` and downloads only the artifact ID emitted by
+`seal`. Embedded dependency-free Node code
 recomputes the tarball digest and independently binds repository name and ID,
 default branch, tag, commit, run ID and attempt, workflow SHA, profile, signer,
 version, and derived dist-tag to trusted GitHub context. It then invokes:
@@ -483,8 +493,9 @@ overwrite a conflicting GitHub Release. See [recovery](./recovery.md).
 
 1. No persistent npm publishing token — CI uses only short-lived OIDC
    credentials.
-2. Package code never runs with npm publishing authority. `prepare` runs
-   package code and has no OIDC; `stage` has OIDC and runs no package code.
+2. Package code never runs with npm publishing authority. `prepare` and
+   `candidate_smoke` run package code without OIDC; `stage` has OIDC and runs
+   no package code.
 3. Package code never runs with GitHub Release write authority. `public_smoke`
    runs package code and exports no trusted output; `release` can write and
    runs no package code.

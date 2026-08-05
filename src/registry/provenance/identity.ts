@@ -5,29 +5,15 @@ import { buildFailures } from './predicate.ts';
 import {
     UNRECOGNIZED,
     type ExpectedProvenance,
-    type ProvenanceIdentityInput,
+    type ProvenanceBundleInput,
 } from './model.ts';
 
-const PROVENANCE_PREDICATE = 'slsa.dev/provenance';
-
-// Pure identity check over the already-fetched registry attestations document.
-export function verifyProvenanceIdentity(input: ProvenanceIdentityInput): string[] {
+// npm has already verified this exact bundle cryptographically. This function
+// binds that proof to the release identity Sallyport expects.
+export function verifyProvenanceBundle(input: ProvenanceBundleInput): string[] {
     const { expected } = input;
     const label = `${expected.packageName}@${expected.packageVersion}`;
-    const entries = attestationEntries(input.attestations);
-    if (entries === null) {
-        return [`${UNRECOGNIZED}: no attestation list for ${label}.`];
-    }
-    if (entries.length === 0) {
-        return [`No attestations are published for ${label}.`];
-    }
-    const provenance = entries.find(
-        (entry) => readStringProperty(entry, 'predicateType')?.includes(PROVENANCE_PREDICATE) === true,
-    );
-    if (provenance === undefined) {
-        return [`No SLSA provenance attestation is published for ${label}.`];
-    }
-    const bundle = readProperty(provenance, 'bundle');
+    const { bundle } = input;
     const failures: string[] = [];
     if (!hasSigningCertificate(bundle)) {
         failures.push(`${UNRECOGNIZED}: the provenance bundle carries no signing certificate.`);
@@ -40,13 +26,6 @@ export function verifyProvenanceIdentity(input: ProvenanceIdentityInput): string
     failures.push(...subjectFailures(statement, expected));
     failures.push(...buildFailures(statement, expected));
     return failures;
-}
-
-function attestationEntries(value: unknown): unknown[] | null {
-    if (Array.isArray(value)) {
-        return value as unknown[];
-    }
-    return readArrayProperty(value, 'attestations');
 }
 
 function hasSigningCertificate(bundle: unknown): boolean {

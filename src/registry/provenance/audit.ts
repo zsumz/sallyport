@@ -7,6 +7,7 @@ import {
 } from '../download.ts';
 import {
     UNRECOGNIZED,
+    type AuditProof,
     type AuditOutcome,
     type AuditSignaturesInput,
     type ExpectedProvenance,
@@ -38,13 +39,16 @@ export function runAuditSignatures(input: AuditSignaturesInput): AuditOutcome {
     }
 }
 
-export function verifyAuditSignatures(
+export function verifyAuditProof(
     report: unknown,
     expected: ExpectedProvenance,
-): string[] {
+): AuditProof {
     const label = `${expected.packageName}@${expected.packageVersion}`;
     if (typeof report !== 'object' || report === null) {
-        return [`${UNRECOGNIZED}: npm audit signatures output was not an object.`];
+        return {
+            failures: [`${UNRECOGNIZED}: npm audit signatures output was not an object.`],
+            provenanceBundle: null,
+        };
     }
     const failures: string[] = [];
     failures.push(...unverifiedFailures(report, 'invalid'));
@@ -52,21 +56,48 @@ export function verifyAuditSignatures(
     const verified = readArrayProperty(report, 'verified');
     if (verified === null) {
         failures.push(`${UNRECOGNIZED}: npm audit signatures reported no verified list.`);
-        return failures;
+        return { failures, provenanceBundle: null };
     }
-    const entry = verified.find(
+    const entries = verified.filter(
         (value) => readStringProperty(value, 'name') === expected.packageName
             && readStringProperty(value, 'version') === expected.packageVersion,
     );
-    if (entry === undefined) {
+    if (entries.length === 0) {
         failures.push(`npm did not verify the registry signature for ${label}.`);
-        return failures;
+        return { failures, provenanceBundle: null };
     }
+    if (entries.length !== 1) {
+        failures.push(`${UNRECOGNIZED}: npm reported duplicate verified entries for ${label}.`);
+        return { failures, provenanceBundle: null };
+    }
+    const entry = entries[0];
     const provenance = readProperty(readProperty(entry, 'attestations'), 'provenance');
     if (typeof provenance !== 'object' || provenance === null) {
         failures.push(`npm did not verify a provenance attestation for ${label}.`);
+        return { failures, provenanceBundle: null };
     }
-    return failures;
+    const bundles = readArrayProperty(entry, 'attestationBundles');
+    if (bundles === null) {
+        failures.push(`${UNRECOGNIZED}: npm returned no verified attestation bundles for ${label}.`);
+        return { failures, provenanceBundle: null };
+    }
+    const provenanceBundles = bundles.filter(
+        (value) => readStringProperty(value, 'predicateType')?.includes('slsa.dev/provenance') === true,
+    );
+    if (provenanceBundles.length === 0) {
+        failures.push(`npm returned no verified provenance bundle for ${label}.`);
+        return { failures, provenanceBundle: null };
+    }
+    if (provenanceBundles.length !== 1) {
+        failures.push(`${UNRECOGNIZED}: npm returned multiple verified provenance bundles for ${label}.`);
+        return { failures, provenanceBundle: null };
+    }
+    const bundle = readProperty(provenanceBundles[0], 'bundle');
+    if (typeof bundle !== 'object' || bundle === null) {
+        failures.push(`${UNRECOGNIZED}: npm returned an invalid verified provenance bundle for ${label}.`);
+        return { failures, provenanceBundle: null };
+    }
+    return { failures, provenanceBundle: bundle };
 }
 
 function unverifiedFailures(report: unknown, key: string): string[] {

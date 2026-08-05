@@ -6,4 +6,5 @@ export interface RemoteTarget {
     packageName: string;
     profile: Profile;
     defaultBranch: string;
+    requiredStatusChecks: readonly string[] | null | undefined;
 }

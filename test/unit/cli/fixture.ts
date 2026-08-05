@@ -113,6 +113,7 @@ export function createConsumer(root: string, options: ConsumerOptions = {}): Con
         main: 'index.js',
         files: ['index.js'],
         publishConfig: { access: 'public' },
+        sallyport: { requiredStatusChecks: ['CI'] },
         scripts: options.scripts ?? {
             'release:check': 'node -e "process.exit(0)"',
             'release:smoke': 'node smoke.mjs',

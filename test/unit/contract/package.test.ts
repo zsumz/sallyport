@@ -20,6 +20,7 @@ const baseInput: PackageContractInput = {
     publishAccess: 'public',
     publishProvenance: undefined,
     repositoryUrl: 'git+https://github.com/zsumz/smoque.git',
+    requiredStatusChecks: ['CI'],
     hasLockfile: true,
     lockName: 'smoque',
     lockVersion: '0.1.2',
@@ -298,6 +299,7 @@ describe('readPackageMetadata', () => {
                     url: 'git+https://github.com/zsumz/smoque.git',
                 },
                 publishConfig: { access: 'public', provenance: true },
+                sallyport: { requiredStatusChecks: ['CI', 'Coverage'] },
             },
             'package-lock.json': {
                 name: 'smoque',
@@ -314,6 +316,7 @@ describe('readPackageMetadata', () => {
             publishAccess: 'public',
             publishProvenance: true,
             repositoryUrl: 'git+https://github.com/zsumz/smoque.git',
+            requiredStatusChecks: ['CI', 'Coverage'],
             hasLockfile: true,
             lockName: 'smoque',
             lockVersion: '0.1.2',

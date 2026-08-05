@@ -3,23 +3,21 @@ import path from 'node:path';
 
 import type { CandidateReceipt } from '../../../candidate/receipt.ts';
 import {
-    fetchAttestations,
     runAuditSignatures,
-    verifyAuditSignatures,
-    verifyProvenanceIdentity,
+    verifyAuditProof,
+    verifyProvenanceBundle,
     type ExpectedProvenance,
 } from '../../../registry/provenance.ts';
 import { ensureDirectory, errorMessage, jsonDocument } from '../../support.ts';
 import type { CliEffects } from '../effects.ts';
 import { PROVENANCE_DIRECTORY, type ProvenanceOutcome } from './model.ts';
 
-// npm's signature check runs against a throwaway install of the public package;
-// the identity check runs against the registry attestation document.
+// npm's audit both verifies the bundle and returns the exact verified bytes.
+// Identity is parsed only from that cryptographically bound proof.
 export async function verifyProvenance(
     effects: CliEffects,
     outputDir: string,
     receipt: CandidateReceipt,
-    registry: string,
     expected: ExpectedProvenance,
 ): Promise<ProvenanceOutcome> {
     const installDir = path.join(outputDir, PROVENANCE_DIRECTORY);
@@ -45,24 +43,17 @@ export async function verifyProvenance(
         };
     }
     const audit = runAuditSignatures({ exec: effects.exec, installDir, cacheDir });
-    const signatureFailures = audit.ok
-        ? verifyAuditSignatures(audit.report, expected)
-        : audit.failures;
-    let provenanceFailures: string[];
-    try {
-        const attestations = await fetchAttestations(
-            effects.registry.fetchJson,
-            registry,
-            expected.packageName,
-            expected.packageVersion,
-        );
-        provenanceFailures = verifyProvenanceIdentity({ attestations, expected });
-    } catch (error) {
-        provenanceFailures = [`attestation download failed: ${errorMessage(error)}`];
-    }
+    const proof = audit.ok
+        ? verifyAuditProof(audit.report, expected)
+        : { failures: audit.failures, provenanceBundle: null };
+    const provenanceFailures = proof.provenanceBundle === null
+        ? []
+        : verifyProvenanceBundle({ bundle: proof.provenanceBundle, expected });
     return {
-        signatureVerified: signatureFailures.length === 0,
-        provenanceVerified: provenanceFailures.length === 0,
-        failures: [...signatureFailures, ...provenanceFailures],
+        signatureVerified: proof.failures.length === 0,
+        provenanceVerified: proof.failures.length === 0
+            && proof.provenanceBundle !== null
+            && provenanceFailures.length === 0,
+        failures: [...proof.failures, ...provenanceFailures],
     };
 }

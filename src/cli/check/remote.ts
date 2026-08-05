@@ -37,6 +37,7 @@ export function runRemoteChecks(
         dir: path.resolve(options.dir),
         profile: context.profile,
         defaultBranch: '',
+        requiredStatusChecks: context.metadata?.requiredStatusChecks,
     };
     const npmChecks = [npmTrustCheck(npmTarget, options), npmMfaCheck(npmTarget, options)];
     if (!repository.ok) {

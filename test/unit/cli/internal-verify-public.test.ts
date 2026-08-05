@@ -31,9 +31,10 @@ let harness: TestEffects;
 let commands: RecordedCommand[] = [];
 let distTags: Record<string, string> = {};
 let registryIntegrity = '';
-let attestationsBody: unknown = null;
+let directAttestations: unknown = null;
 let auditReport: unknown = null;
 let tarballUrl = '';
+let registryJsonUrls: string[] = [];
 
 beforeEach(() => {
     root = makeTempRoot('verify');
@@ -43,12 +44,14 @@ beforeEach(() => {
     distTags = { latest: candidate.consumer.version };
     registryIntegrity = candidate.digest.integrity;
     tarballUrl = `${REGISTRY}/${candidate.consumer.name}/-/${candidate.consumer.name}-${candidate.consumer.version}.tgz`;
-    attestationsBody = attestations();
+    directAttestations = attestations();
+    registryJsonUrls = [];
     auditReport = {
         verified: [{
             name: candidate.consumer.name,
             version: candidate.consumer.version,
             attestations: { provenance: { predicateType: 'https://slsa.dev/provenance/v1' } },
+            attestationBundles: attestationEntries(),
         }],
         invalid: [],
         missing: [],
@@ -83,6 +86,7 @@ const recordingExec: CommandRunner = (command, args, options) => {
 };
 
 async function fetchJson(url: string): Promise<JsonResponse> {
+    registryJsonUrls.push(url);
     if (url === `${REGISTRY}/${candidate.consumer.name}`) {
         return Promise.resolve({ status: 200, body: packument() });
     }
@@ -90,7 +94,7 @@ async function fetchJson(url: string): Promise<JsonResponse> {
         return Promise.resolve({ status: 200, body: distTags });
     }
     if (url.includes('/-/npm/v1/attestations/')) {
-        return Promise.resolve({ status: 200, body: attestationsBody });
+        return Promise.resolve({ status: 200, body: directAttestations });
     }
     return Promise.resolve({ status: 404, body: null });
 }
@@ -148,16 +152,20 @@ function statement(overrides: Record<string, unknown> = {}): Record<string, unkn
 
 function attestations(payload: Record<string, unknown> = statement()): Record<string, unknown> {
     return {
-        attestations: [{
-            predicateType: 'https://slsa.dev/provenance/v1',
-            bundle: {
-                verificationMaterial: { certificate: { rawBytes: 'Y2VydA==' } },
-                dsseEnvelope: {
-                    payload: Buffer.from(JSON.stringify(payload)).toString('base64'),
-                },
-            },
-        }],
+        attestations: attestationEntries(payload),
     };
+}
+
+function attestationEntries(payload: Record<string, unknown> = statement()): unknown[] {
+    return [{
+        predicateType: 'https://slsa.dev/provenance/v1',
+        bundle: {
+            verificationMaterial: { certificate: { rawBytes: 'Y2VydA==' } },
+            dsseEnvelope: {
+                payload: Buffer.from(JSON.stringify(payload)).toString('base64'),
+            },
+        },
+    }];
 }
 
 async function verify(overrides: Partial<Record<string, string>> = {}): Promise<void> {
@@ -279,8 +287,8 @@ describe('internal verify-public', () => {
         await expect(verify()).rejects.toThrow(/did not verify the registry signature/u);
     });
 
-    it('fails when the provenance names a different repository', async () => {
-        attestationsBody = attestations(statement({
+    it('rejects a split view whose verified bundle names a different repository', async () => {
+        const attacker = statement({
             predicate: {
                 buildDefinition: {
                     externalParameters: {
@@ -292,15 +300,37 @@ describe('internal verify-public', () => {
                     },
                 },
             },
-        }));
+        });
+        auditReport = {
+            verified: [{
+                name: candidate.consumer.name,
+                version: candidate.consumer.version,
+                attestations: { provenance: { predicateType: 'https://slsa.dev/provenance/v1' } },
+                attestationBundles: attestationEntries(attacker),
+            }],
+            invalid: [],
+            missing: [],
+        };
+        directAttestations = attestations();
 
         await expect(verify()).rejects.toThrow(/Provenance repository attacker\/fake/u);
+        expect(registryJsonUrls.some((url) => url.includes('/-/npm/v1/attestations/')))
+            .toBe(false);
     });
 
-    it('fails when no provenance attestation is published', async () => {
-        attestationsBody = { attestations: [] };
+    it('fails when npm returns no verified provenance bundle', async () => {
+        auditReport = {
+            verified: [{
+                name: candidate.consumer.name,
+                version: candidate.consumer.version,
+                attestations: { provenance: { predicateType: 'https://slsa.dev/provenance/v1' } },
+                attestationBundles: [],
+            }],
+            invalid: [],
+            missing: [],
+        };
 
-        await expect(verify()).rejects.toThrow(/No attestations are published/u);
+        await expect(verify()).rejects.toThrow(/no verified provenance bundle/u);
     });
 
     it('fails when the candidate directory bytes disagree with the receipt', async () => {

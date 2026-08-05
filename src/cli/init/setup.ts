@@ -39,6 +39,7 @@ export function setupChecklist(profile: Profile, version: string): string[] {
         'Run the npm trust command above; npm allows one trusted publisher per package.',
         'Set npm publishing access to require two-factor authentication and disallow tokens.',
         'Remove obsolete npm automation tokens.',
+        'Declare exact GitHub Actions check names in package.json sallyport.requiredStatusChecks.',
         `Commit release notes to ${RELEASE_NOTES_DIRECTORY}/v${version}.md before tagging.`,
     ];
     return [

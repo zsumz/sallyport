@@ -86,7 +86,18 @@ publish, and no long-lived npm credential exists anywhere.
 
 ## 6. GitHub posture
 
-Documented, not mutated by v0.1.0. Confirm each:
+Declare the exact GitHub Actions check names your default-branch ruleset must
+require:
+
+```json
+{
+  "sallyport": {
+    "requiredStatusChecks": ["CI", "Coverage gate"]
+  }
+}
+```
+
+Then confirm each:
 
 - protected default branch
 - pull requests required
@@ -96,6 +107,15 @@ Documented, not mutated by v0.1.0. Confirm each:
 - blocked force pushes
 - protected `v*` tags
 - immutable Releases
+
+The default-branch ruleset must require exactly those checks from the GitHub
+Actions App, use strict status checks, and have no bypass actors. The `v*`
+ruleset must have no bypass actors and must block updates, deletion, and force
+pushes. Sallyport deliberately leaves new tag creation unrestricted; strict
+mode authorizes a release through the configured signing fingerprint.
+
+GitHub omits `bypass_actors` when the caller cannot inspect it. In that case
+`check --remote` reports `UNVERIFIED`, never `PASS`.
 
 ## 7. Verify
 
@@ -135,7 +155,8 @@ npx sallyport@alpha check --remote
 
 The remote pass adds checks for both GitHub environments, stage-only npm
 trust, npm publishing MFA, immutable Releases, the signer variable, and the
-default-branch and `v*` rulesets. It is read-only. An unavailable or
+default-branch and `v*` rulesets, including check names, source App, and bypass
+actors. It is read-only. An unavailable or
 unauthenticated setting is `UNVERIFIED`, never `PASS`, and makes the command
 exit nonzero.
 

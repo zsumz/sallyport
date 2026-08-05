@@ -44,6 +44,16 @@
     "access": "public",
     "tag": "alpha"
   },
+  "sallyport": {
+    "requiredStatusChecks": [
+      "Workflow syntax",
+      "Validate Linux / Node 22.x",
+      "Validate Linux / Node 24.x",
+      "Validate Linux / Node 26.x",
+      "Validate macOS / Node 22.x",
+      "Coverage gate"
+    ]
+  },
   "scripts": {
     "clean": "rm -rf dist coverage",
     "build": "npm run clean && tsc -p tsconfig.json",

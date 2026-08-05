@@ -1,12 +1,13 @@
 export type {
     AuditOutcome,
+    AuditProof,
     AuditSignaturesInput,
     CommandRunner,
     ExpectedProvenance,
-    ProvenanceIdentityInput,
+    ProvenanceBundleInput,
     ProvenanceResult,
     ProvenanceVerificationInput,
 } from './provenance/model.ts';
-export { runAuditSignatures, verifyAuditSignatures } from './provenance/audit.ts';
-export { verifyProvenanceIdentity } from './provenance/identity.ts';
-export { fetchAttestations, verifyRegistryProvenance } from './provenance/verify.ts';
+export { runAuditSignatures, verifyAuditProof } from './provenance/audit.ts';
+export { verifyProvenanceBundle } from './provenance/identity.ts';
+export { verifyRegistryProvenance } from './provenance/verify.ts';

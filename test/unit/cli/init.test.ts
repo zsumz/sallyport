@@ -155,6 +155,7 @@ describe('runInit', () => {
         expect(printed).toContain('npm-stage environment');
         expect(printed).toContain('github-release environment');
         expect(printed).toContain('SALLYPORT_SIGNER_FINGERPRINT');
+        expect(printed).toContain('sallyport.requiredStatusChecks');
         expect(printed).toContain('docs/releases/v1.2.3.md');
     });
 

@@ -6,6 +6,7 @@ export interface PackageMetadata {
     publishAccess: string | undefined;
     publishProvenance: boolean | undefined;
     repositoryUrl: string | undefined;
+    requiredStatusChecks: readonly string[] | null | undefined;
     hasLockfile: boolean;
     lockName: string | undefined;
     lockVersion: string | undefined;

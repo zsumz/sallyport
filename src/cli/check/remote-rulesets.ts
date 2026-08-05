@@ -1,11 +1,12 @@
 import { result, type CheckOptions, type CheckResult } from './model.ts';
-import { readRemoteJson } from './remote-command.ts';
 import {
-    arrayProperty,
-    objectProperty,
-    objectsValue,
-    stringProperty,
-} from './remote-shape.ts';
+    evaluateBranchRules,
+    evaluateTagRules,
+    normalizedExpectedChecks,
+    type RuleEvaluation,
+} from './remote-ruleset-policy.ts';
+import { readRemoteJson } from './remote-command.ts';
+import { objectsValue, stringProperty } from './remote-shape.ts';
 import type { RemoteTarget } from './remote-target.ts';
 
 interface RuleSetState {
@@ -18,6 +19,10 @@ export function rulesetCheck(
     options: CheckOptions,
 ): CheckResult {
     const id = 'remote-rulesets';
+    const expectedChecks = normalizedExpectedChecks(target.requiredStatusChecks);
+    if (!expectedChecks.ok) {
+        return result(id, 'unverified', expectedChecks.message);
+    }
     const root = `repos/${target.repository}/rulesets`;
     const list = readRemoteJson(options, 'gh', ['api', root]);
     if (!list.ok) {
@@ -32,15 +37,9 @@ export function rulesetCheck(
         'branch',
         root,
         options,
-        (ruleset) => branchRulesMatch(ruleset, target),
+        (ruleset) => evaluateBranchRules(ruleset, target, expectedChecks.value),
     );
-    const tag = inspectRulesets(
-        summaries,
-        'tag',
-        root,
-        options,
-        tagRulesMatch,
-    );
+    const tag = inspectRulesets(summaries, 'tag', root, options, evaluateTagRules);
     const readFailure = branch.unverified ?? tag.unverified;
     if (readFailure !== null) {
         return result(id, 'unverified', readFailure);
@@ -53,7 +52,11 @@ export function rulesetCheck(
         failures.push('the v* tag ruleset is incomplete');
     }
     return failures.length === 0
-        ? result(id, 'pass', 'active rulesets protect the default branch and v* tags.')
+        ? result(
+            id,
+            'pass',
+            'no-bypass rulesets protect the default branch and existing v* tags; tag creation is unrestricted.',
+        )
         : result(id, 'fail', `${failures.join('; ')}.`);
 }
 
@@ -62,7 +65,7 @@ function inspectRulesets(
     target: string,
     root: string,
     options: CheckOptions,
-    matches: (value: unknown) => boolean,
+    evaluate: (value: unknown) => RuleEvaluation,
 ): RuleSetState {
     const candidates = summaries.filter((entry) =>
         stringProperty(entry, 'target') === target
@@ -77,53 +80,15 @@ function inspectRulesets(
         const read = readRemoteJson(options, 'gh', ['api', `${root}/${String(rulesetId)}`]);
         if (!read.ok) {
             unverified = read.message;
-        } else if (matches(read.value)) {
+            continue;
+        }
+        const evaluation = evaluate(read.value);
+        if (evaluation.status === 'match') {
             return { match: true, unverified: null };
+        }
+        if (evaluation.status === 'unverified') {
+            unverified = evaluation.message;
         }
     }
     return { match: false, unverified };
-}
-
-function branchRulesMatch(value: unknown, target: RemoteTarget): boolean {
-    const include = includedRefs(value);
-    const types = ruleTypes(value);
-    const required = [
-        'deletion',
-        'non_fast_forward',
-        'pull_request',
-        'required_linear_history',
-        'required_status_checks',
-    ];
-    if (target.profile === 'strict') {
-        required.push('required_signatures');
-    }
-    const statusRule = arrayProperty(value, 'rules')?.find(
-        (rule) => stringProperty(rule, 'type') === 'required_status_checks',
-    );
-    const statusChecks = arrayProperty(objectProperty(statusRule, 'parameters'), 'required_status_checks');
-    return (include.includes('~DEFAULT_BRANCH')
-        || include.includes(`refs/heads/${target.defaultBranch}`))
-        && required.every((type) => types.includes(type))
-        && statusChecks !== null
-        && statusChecks.length > 0;
-}
-
-function tagRulesMatch(value: unknown): boolean {
-    const include = includedRefs(value);
-    const types = ruleTypes(value);
-    return include.includes('refs/tags/v*')
-        && ['deletion', 'non_fast_forward', 'update'].every((type) => types.includes(type));
-}
-
-function includedRefs(value: unknown): string[] {
-    const conditions = objectProperty(value, 'conditions');
-    const refName = objectProperty(conditions, 'ref_name');
-    return (arrayProperty(refName, 'include') ?? [])
-        .filter((entry): entry is string => typeof entry === 'string');
-}
-
-function ruleTypes(value: unknown): string[] {
-    return (arrayProperty(value, 'rules') ?? [])
-        .map((rule) => stringProperty(rule, 'type'))
-        .filter((type): type is string => type !== null);
 }

@@ -8,6 +8,7 @@ import {
     createConsumer,
     FIXTURE_SHA,
     makeTempRoot,
+    readTextFile,
     removeTempRoot,
     writeTextFile,
     type Consumer,
@@ -104,13 +105,116 @@ describe('runCheck remote posture', () => {
             .every((check) => check.status === 'pass')).toBe(true);
         expect(report.ok).toBe(true);
     });
+
+    it('returns UNVERIFIED when GitHub hides bypass actors', async () => {
+        const status = await rulesetStatus((routes) => {
+            const ruleset = branchRuleset(false, false) as Record<string, unknown>;
+            delete ruleset.bypass_actors;
+            routes.set('gh api repos/zsumz/fake/rulesets/1', ruleset);
+        });
+
+        expect(status).toBe('unverified');
+    });
+
+    it('rejects broad bypass actors', async () => {
+        const status = await rulesetStatus((routes) => {
+            const ruleset = branchRuleset(false, false) as Record<string, unknown>;
+            ruleset.bypass_actors = [
+                { actor_id: 1, actor_type: 'RepositoryRole', bypass_mode: 'always' },
+            ];
+            routes.set('gh api repos/zsumz/fake/rulesets/1', ruleset);
+        });
+
+        expect(status).toBe('fail');
+    });
+
+    it('requires exact check names from the GitHub Actions App', async () => {
+        for (const requiredStatusChecks of [
+            [{ context: 'always-green', integration_id: 15_368 }],
+            [{ context: 'CI' }],
+            [{ context: 'CI', integration_id: 99 }],
+        ]) {
+            const status = await rulesetStatus((routes) => {
+                const ruleset = branchRuleset(false, false) as {
+                    rules: Array<{ type: string; parameters?: Record<string, unknown> }>;
+                };
+                const rule = ruleset.rules.find((entry) => entry.type === 'required_status_checks');
+                if (rule?.parameters !== undefined) {
+                    rule.parameters.required_status_checks = requiredStatusChecks;
+                }
+                routes.set('gh api repos/zsumz/fake/rulesets/1', ruleset);
+            });
+            expect(status).toBe('fail');
+        }
+    });
+
+    it('keeps v* tag creation deliberately unrestricted', async () => {
+        const status = await rulesetStatus((routes) => {
+            const ruleset = tagRuleset(false) as { rules: Array<{ type: string }> };
+            ruleset.rules.push({ type: 'creation' });
+            routes.set('gh api repos/zsumz/fake/rulesets/2', ruleset);
+        });
+
+        expect(status).toBe('fail');
+    });
+
+    it('requires an unambiguous package-declared status-check policy', async () => {
+        const manifestFile = path.join(consumer.dir, 'package.json');
+        const manifest = JSON.parse(readTextFile(manifestFile)) as Record<string, unknown>;
+        for (const value of [undefined, null, [], [''], ['CI', 'CI']] as const) {
+            if (value === undefined) {
+                delete manifest.sallyport;
+            } else {
+                manifest.sallyport = { requiredStatusChecks: value };
+            }
+            writeTextFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+            const status = await rulesetStatus(() => undefined);
+            expect(status).toBe('unverified');
+        }
+    });
+
+    it('returns UNVERIFIED when status-check policy details are absent', async () => {
+        const status = await rulesetStatus((routes) => {
+            const ruleset = branchRuleset(false, false) as {
+                rules: Array<{ type: string; parameters?: Record<string, unknown> }>;
+            };
+            const rule = ruleset.rules.find((entry) => entry.type === 'required_status_checks');
+            delete rule?.parameters?.strict_required_status_checks_policy;
+            routes.set('gh api repos/zsumz/fake/rulesets/1', ruleset);
+        });
+
+        expect(status).toBe('unverified');
+    });
+
+    it('rejects duplicate required status checks', async () => {
+        const status = await rulesetStatus((routes) => {
+            const ruleset = branchRuleset(false, false) as {
+                rules: Array<{ type: string; parameters?: Record<string, unknown> }>;
+            };
+            const rule = ruleset.rules.find((entry) => entry.type === 'required_status_checks');
+            if (rule?.parameters !== undefined) {
+                rule.parameters.required_status_checks = [
+                    { context: 'CI', integration_id: 15_368 },
+                    { context: 'CI', integration_id: 15_368 },
+                ];
+            }
+            routes.set('gh api repos/zsumz/fake/rulesets/1', ruleset);
+        });
+
+        expect(status).toBe('fail');
+    });
 });
 
 function remoteRunner(
-    options: { unsafe?: boolean; alternateShapes?: boolean } = {},
+    options: {
+        unsafe?: boolean;
+        alternateShapes?: boolean;
+        mutate?: (routes: Map<string, unknown>) => void;
+    } = {},
 ): CommandRunner {
     const unsafe = options.unsafe === true;
     const routes = remoteRoutes(unsafe, options.alternateShapes === true);
+    options.mutate?.(routes);
     return (command, args, commandOptions) => {
         if (command === 'git') {
             return runCommand(command, args, commandOptions);
@@ -127,6 +231,17 @@ function remoteRunner(
         }
         return { stdout: JSON.stringify(value), stderr: '' };
     };
+}
+
+async function rulesetStatus(
+    mutate: (routes: Map<string, unknown>) => void,
+): Promise<string | undefined> {
+    const report = await runCheck({
+        dir: consumer.dir,
+        exec: remoteRunner({ mutate }),
+        remote: true,
+    });
+    return report.checks.find((check) => check.id === 'remote-rulesets')?.status;
 }
 
 function remoteRoutes(unsafe: boolean, alternateShapes: boolean): Map<string, unknown> {
@@ -211,11 +326,20 @@ function branchRuleset(unsafe: boolean, explicitBranch: boolean): unknown {
         ];
     const statusRules = unsafe ? [] : [{
         type: 'required_status_checks',
-        parameters: { required_status_checks: [{ context: 'CI' }] },
+        parameters: {
+            required_status_checks: [{ context: 'CI', integration_id: 15_368 }],
+            strict_required_status_checks_policy: true,
+        },
     }];
     return {
+        bypass_actors: unsafe
+            ? [{ actor_id: 1, actor_type: 'RepositoryRole', bypass_mode: 'always' }]
+            : [],
         conditions: {
-            ref_name: { include: [explicitBranch ? 'refs/heads/main' : '~DEFAULT_BRANCH'] },
+            ref_name: {
+                include: [explicitBranch ? 'refs/heads/main' : '~DEFAULT_BRANCH'],
+                exclude: [],
+            },
         },
         rules: [
             ...types.map((type) => ({ type })),
@@ -226,7 +350,10 @@ function branchRuleset(unsafe: boolean, explicitBranch: boolean): unknown {
 
 function tagRuleset(unsafe: boolean): unknown {
     return {
-        conditions: { ref_name: { include: ['refs/tags/v*'] } },
+        bypass_actors: unsafe
+            ? [{ actor_id: 1, actor_type: 'RepositoryRole', bypass_mode: 'always' }]
+            : [],
+        conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
         rules: (unsafe ? ['deletion'] : ['deletion', 'non_fast_forward', 'update'])
             .map((type) => ({ type })),
     };

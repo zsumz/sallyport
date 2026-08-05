@@ -60,6 +60,13 @@ const JOB_BOUNDARIES: readonly JobBoundary[] = [
         runsConsumerCode: false,
     },
     {
+        workflow: 'stage.yml',
+        job: 'candidate_smoke',
+        permissions: { actions: 'read', contents: 'read' },
+        environment: undefined,
+        runsConsumerCode: true,
+    },
+    {
         workflow: 'finalize.yml',
         job: 'verify_core',
         permissions: { actions: 'read', contents: 'read' },
@@ -205,6 +212,7 @@ describe('reusable workflow privilege boundaries', () => {
         for (const [file, job] of [
             ['stage.yml', 'prepare'],
             ['stage.yml', 'seal'],
+            ['stage.yml', 'candidate_smoke'],
             ['finalize.yml', 'verify_core'],
         ] as const) {
             const sallyportCheckout = stepsOf(jobOf(file, job)).find(
@@ -227,6 +235,7 @@ describe('reusable workflow privilege boundaries', () => {
         for (const [file, job] of [
             ['stage.yml', 'prepare'],
             ['stage.yml', 'seal'],
+            ['stage.yml', 'candidate_smoke'],
             ['finalize.yml', 'verify_core'],
             ['finalize.yml', 'public_smoke'],
         ] as const) {
@@ -252,11 +261,17 @@ describe('reusable workflow privilege boundaries', () => {
         }
     });
 
-    it('consumer smoke exports no artifact or job output trusted by release', () => {
-        const smoke = jobOf('finalize.yml', 'public_smoke');
-        expect(smoke.needs).toBe('verify_core');
-        expect(usesOf(smoke).some((uses) => uses.includes('actions/upload-artifact'))).toBe(false);
-        expect(JSON.stringify(smoke)).not.toContain('GITHUB_OUTPUT');
+    it('consumer smoke exports no artifact or job output trusted by credentialed jobs', () => {
+        const candidate = jobOf('stage.yml', 'candidate_smoke');
+        const publicSmoke = jobOf('finalize.yml', 'public_smoke');
+        expect(candidate.needs).toBe('seal');
+        expect(publicSmoke.needs).toBe('verify_core');
+        for (const smoke of [candidate, publicSmoke]) {
+            expect(usesOf(smoke).some((uses) => uses.includes('actions/upload-artifact')))
+                .toBe(false);
+            expect(JSON.stringify(smoke)).not.toContain('GITHUB_OUTPUT');
+        }
+        expect(jobOf('stage.yml', 'stage').needs).toEqual(['seal', 'candidate_smoke']);
         expect(jobOf('finalize.yml', 'release').needs).toEqual(['verify_core', 'public_smoke']);
     });
 });

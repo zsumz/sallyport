@@ -15,15 +15,19 @@ executes on every release by definition.
 
 sallyport splits authority so that package code never holds any.
 
-`prepare` runs package code — `npm ci`, `release:check`, the pack, and
-`release:smoke` — with `contents: read` only. It has no OIDC token, no write
-permission, and no secrets. It may emit only an untrusted tarball.
+`prepare` runs `npm ci`, `release:check`, and the pack with `contents: read`
+only. It has no OIDC token, write permission, or secrets. It may emit only an
+untrusted tarball.
 
 A fresh `seal` runner downloads that tarball by immutable artifact ID and runs
 no package or dependency code. It checks out the exact commit, tag, default
 branch, and pinned sallyport implementation again; verifies the source and
 packed manifest; and alone authors `candidate.json`. Package code can choose
 its emitted bytes, but it cannot forge the receipt or trusted context.
+
+`candidate_smoke` then downloads that sealed artifact by ID and runs
+`release:smoke` with no authority. It uploads nothing and exposes no output.
+The staging job waits for its success, so the exact staged bytes were smoked.
 
 `stage` holds the OIDC credential and runs no package code at all: no caller
 checkout, no sallyport checkout, no `npm ci`, no `npm run`, no local Actions, no
@@ -62,10 +66,10 @@ never producing a second tarball.
 The candidate is packed exactly once with `--ignore-scripts`. After all package
 code has stopped, `seal` downloads that output on a fresh runner, validates its
 packed manifest, and records SHA-256, SHA-512, SRI integrity, and byte length.
-The staging job downloads the sealed artifact by ID and recomputes the digests
-before publishing. Finalization requires the public registry tarball to be
-byte-for-byte equal, then seals it into the release bundle before the separate
-consumer smoke runs.
+An unprivileged job smokes those sealed bytes. The staging job waits for it,
+downloads the same sealed artifact by ID, and recomputes the digests before
+publishing. Finalization requires the public registry tarball to be byte-for-byte
+equal, then seals it into the release bundle before a second consumer smoke.
 
 This binds metadata, context, and immutable bytes. It does not prove that the
 JavaScript intentionally emitted by a reviewed package is benign.
@@ -104,8 +108,10 @@ registry `dist.integrity` matches the candidate; the downloaded tarball's
 SHA-256, SHA-512, and byte length equal the candidate's; the packed manifest
 matches name and version; the registry signature is valid; and an npm
 provenance attestation exists and identifies the expected GitHub repository
-and workflow run. The public tarball is then smoked again with the consumer's
-own `release:smoke`.
+and workflow run. Both cryptographic verification and identity parsing use the
+same `attestationBundles` entry returned by `npm audit signatures`; no second
+registry response can supply a more convenient identity. The public tarball is
+then smoked again with the consumer's own `release:smoke`.
 
 The convergence retry loop is deliberately narrow. It retries only temporary
 visibility states, and never retries a cryptographic or metadata mismatch, so

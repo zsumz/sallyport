@@ -88,7 +88,7 @@ export async function verifyPublicCommand(
         tarballSha512: receipt.tarball.sha512,
         runId: receipt.run.id,
     };
-    const provenance = await verifyProvenance(effects, outputDir, receipt, registry, expected);
+    const provenance = await verifyProvenance(effects, outputDir, receipt, expected);
     const smokeFailures = hasFlag(parsed, 'skip-smoke')
         ? []
         : (await runReleaseSmoke({

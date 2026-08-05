@@ -14,6 +14,7 @@ export async function readPackageMetadata(dir: string): Promise<PackageMetadata>
     const lock = await readJsonFile(path.join(dir, 'package-lock.json'));
     const lockRoot = readProperty(readProperty(lock, 'packages'), '');
     const publishConfig = readProperty(manifest, 'publishConfig');
+    const sallyport = readProperty(manifest, 'sallyport');
     const workspaces = readProperty(manifest, 'workspaces');
     return {
         name: readString(manifest, 'name'),
@@ -23,12 +24,27 @@ export async function readPackageMetadata(dir: string): Promise<PackageMetadata>
         publishAccess: readString(publishConfig, 'access'),
         publishProvenance: readBoolean(publishConfig, 'provenance'),
         repositoryUrl: readRepositoryUrl(manifest),
+        requiredStatusChecks: readStringArray(sallyport, 'requiredStatusChecks'),
         hasLockfile: lock !== undefined,
         lockName: readString(lock, 'name'),
         lockVersion: readString(lock, 'version'),
         lockRootName: readString(lockRoot, 'name'),
         lockRootVersion: readString(lockRoot, 'version'),
     };
+}
+
+function readStringArray(
+    value: unknown,
+    key: string,
+): readonly string[] | null | undefined {
+    const property = readProperty(value, key);
+    if (property === undefined) {
+        return undefined;
+    }
+    if (!Array.isArray(property) || !property.every((entry) => typeof entry === 'string')) {
+        return null;
+    }
+    return property;
 }
 
 async function readJsonFile(file: string): Promise<unknown> {

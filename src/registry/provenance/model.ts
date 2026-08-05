@@ -1,6 +1,4 @@
 import type { CommandOptions, CommandResult } from '../../report/exec.ts';
-import type { FetchJson } from '../download.ts';
-
 export const UNRECOGNIZED = 'attestation format not recognized';
 
 export type CommandRunner = (
@@ -19,9 +17,14 @@ export interface ExpectedProvenance {
     runId?: number;
 }
 
-export interface ProvenanceIdentityInput {
-    attestations: unknown;
+export interface ProvenanceBundleInput {
+    bundle: unknown;
     expected: ExpectedProvenance;
+}
+
+export interface AuditProof {
+    failures: string[];
+    provenanceBundle: object | null;
 }
 
 export interface AuditSignaturesInput {
@@ -36,9 +39,7 @@ export type AuditOutcome =
 
 export interface ProvenanceVerificationInput {
     exec: CommandRunner;
-    fetchJson: FetchJson;
     installDir: string;
-    registry: string;
     expected: ExpectedProvenance;
     cacheDir?: string;
 }

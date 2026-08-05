@@ -69,7 +69,15 @@ const EXPECTED_JOB_GRAPH: ReadonlyArray<readonly [
     readonly string[],
     Readonly<Record<string, string | readonly string[]>>,
 ]> = [
-    ['stage.yml', ['prepare', 'seal', 'stage'], { seal: 'prepare', stage: 'seal' }],
+    [
+        'stage.yml',
+        ['prepare', 'seal', 'candidate_smoke', 'stage'],
+        {
+            seal: 'prepare',
+            candidate_smoke: 'seal',
+            stage: ['seal', 'candidate_smoke'],
+        },
+    ],
     [
         'finalize.yml',
         ['verify_core', 'public_smoke', 'release'],
@@ -189,7 +197,11 @@ describe('reusable workflow contract', () => {
 
     it('stage.yml derives every release value from the tag rather than an input', () => {
         const workflow = readWorkflow('stage.yml');
-        const scripts = [...stepsOf(workflow, 'prepare'), ...stepsOf(workflow, 'seal')]
+        const scripts = [
+            ...stepsOf(workflow, 'prepare'),
+            ...stepsOf(workflow, 'seal'),
+            ...stepsOf(workflow, 'candidate_smoke'),
+        ]
             .map((step) => step.run ?? '')
             .join('\n');
         expect(scripts).toContain('internal inspect-source');
@@ -215,11 +227,12 @@ describe('reusable workflow contract', () => {
         const finalize = readWorkflow('finalize.yml');
         const downloads = [
             ...stepsOf(stage, 'seal'),
+            ...stepsOf(stage, 'candidate_smoke'),
             ...stepsOf(stage, 'stage'),
             ...stepsOf(finalize, 'public_smoke'),
             ...stepsOf(finalize, 'release'),
         ].filter((step) => (step.uses ?? '').includes('actions/download-artifact'));
-        expect(downloads).toHaveLength(5);
+        expect(downloads).toHaveLength(6);
         for (const download of downloads) {
             expect(download.with?.['artifact-ids']).toMatch(/^\$\{\{ (?:needs|steps)\./u);
             expect(download.with?.name).toBeUndefined();
@@ -282,6 +295,16 @@ describe('continuous integration workflow', () => {
         const source = readFileSync(`${workflowDirectory}ci.yml`, 'utf8');
         for (const version of ['22.18.0', '24.19.0', '26.x']) {
             expect(source).toContain(`node-version: ${version}`);
+        }
+    });
+
+    it('checks out complete history anywhere the protocol pin can run', () => {
+        const workflow = readWorkflow('ci.yml');
+        for (const job of Object.values(workflow.jobs ?? {})) {
+            const checkout = (job.steps ?? []).find(
+                (step) => (step.uses ?? '').includes('actions/checkout'),
+            );
+            expect(checkout?.with?.['fetch-depth']).toBe(0);
         }
     });
 });

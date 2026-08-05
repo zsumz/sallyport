@@ -1,11 +1,10 @@
 import { Buffer } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 import type { CommandResult } from '../../../src/report/exec.ts';
-import type { FetchJson } from '../../../src/registry/download.ts';
 import {
     runAuditSignatures,
-    verifyAuditSignatures,
-    verifyProvenanceIdentity,
+    verifyAuditProof,
+    verifyProvenanceBundle,
     verifyRegistryProvenance,
     type CommandRunner,
     type ExpectedProvenance,
@@ -77,34 +76,34 @@ function statementV02(): Record<string, unknown> {
     };
 }
 
-function attestationsFor(statement: unknown, options: { certificate?: boolean } = {}): unknown {
+function bundleFor(statement: unknown, options: { certificate?: boolean } = {}): unknown {
     const material = options.certificate === false
         ? {}
         : { x509CertificateChain: { certificates: [{ rawBytes: 'Zm9vYmFy' }] } };
     return {
-        package: 'demo',
-        version: '1.2.3',
-        attestations: [
-            {
-                predicateType: 'https://slsa.dev/provenance/v1',
-                bundle: {
-                    mediaType: 'application/vnd.dev.sigstore.bundle+json;version=0.1',
-                    verificationMaterial: material,
-                    dsseEnvelope: {
-                        payloadType: 'application/vnd.in-toto+json',
-                        payload: Buffer.from(JSON.stringify(statement), 'utf8').toString('base64'),
-                    },
-                },
-            },
-            {
-                predicateType: 'https://github.com/npm/attestation/tree/main/specs/publish/v0.1',
-                bundle: {},
-            },
-        ],
+        mediaType: 'application/vnd.dev.sigstore.bundle+json;version=0.1',
+        verificationMaterial: material,
+        dsseEnvelope: {
+            payloadType: 'application/vnd.in-toto+json',
+            payload: Buffer.from(JSON.stringify(statement), 'utf8').toString('base64'),
+        },
     };
 }
 
-function auditReport(): Record<string, unknown> {
+function verifiedBundles(statement: unknown = statementV1()): unknown[] {
+    return [
+        {
+            predicateType: 'https://slsa.dev/provenance/v1',
+            bundle: bundleFor(statement),
+        },
+        {
+            predicateType: 'https://github.com/npm/attestation/tree/main/specs/publish/v0.1',
+            bundle: {},
+        },
+    ];
+}
+
+function auditReport(statement: unknown = statementV1()): Record<string, unknown> {
     return {
         invalid: [],
         missing: [],
@@ -117,31 +116,30 @@ function auditReport(): Record<string, unknown> {
                     provenance: { predicateType: 'https://slsa.dev/provenance/v1' },
                     publish: { predicateType: 'https://github.com/npm/attestation' },
                 },
+                attestationBundles: verifiedBundles(statement),
             },
         ],
     };
 }
 
-describe('verifyProvenanceIdentity', () => {
+describe('verifyProvenanceBundle', () => {
     it('accepts a SLSA v1 bundle from the expected source', () => {
-        expect(verifyProvenanceIdentity({
-            attestations: attestationsFor(statementV1()),
+        expect(verifyProvenanceBundle({
+            bundle: bundleFor(statementV1()),
             expected: expected(),
         })).toStrictEqual([]);
     });
 
     it('accepts a SLSA v0.2 bundle from the expected source', () => {
-        expect(verifyProvenanceIdentity({
-            attestations: attestationsFor(statementV02()),
+        expect(verifyProvenanceBundle({
+            bundle: bundleFor(statementV02()),
             expected: expected(),
         })).toStrictEqual([]);
     });
 
-    it('accepts a bare attestation array and a tag name without refs/tags', () => {
-        const bare = attestationsFor(statementV1());
-        const list = (bare as { attestations: unknown[] }).attestations;
-        expect(verifyProvenanceIdentity({
-            attestations: list,
+    it('accepts a tag name without refs/tags', () => {
+        expect(verifyProvenanceBundle({
+            bundle: bundleFor(statementV1()),
             expected: { ...expected(), tagRef: 'v1.2.3' },
         })).toStrictEqual([]);
     });
@@ -149,8 +147,8 @@ describe('verifyProvenanceIdentity', () => {
     it('rejects a different source repository', () => {
         const statement = statementV1();
         setWorkflow(statement, 'repository', 'https://github.com/attacker/demo');
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor(statement),
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statement),
             expected: expected(),
         });
         expect(failures).toHaveLength(1);
@@ -160,8 +158,8 @@ describe('verifyProvenanceIdentity', () => {
     it('rejects a different workflow path', () => {
         const statement = statementV1();
         setWorkflow(statement, 'path', '.github/workflows/release.yml');
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor(statement),
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statement),
             expected: expected(),
         });
         expect(failures).toHaveLength(1);
@@ -171,8 +169,8 @@ describe('verifyProvenanceIdentity', () => {
     it('rejects a different tag ref', () => {
         const statement = statementV1();
         setWorkflow(statement, 'ref', 'refs/heads/main');
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor(statement),
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statement),
             expected: expected(),
         });
         expect(failures).toHaveLength(1);
@@ -184,8 +182,8 @@ describe('verifyProvenanceIdentity', () => {
         statement.subject = [
             { name: 'pkg:npm/demo@1.2.3', digest: { sha512: 'f'.repeat(128) } },
         ];
-        expect(verifyProvenanceIdentity({
-            attestations: attestationsFor(statement),
+        expect(verifyProvenanceBundle({
+            bundle: bundleFor(statement),
             expected: expected(),
         })).toStrictEqual([
             'Provenance subject digest does not match the candidate tarball.',
@@ -197,8 +195,8 @@ describe('verifyProvenanceIdentity', () => {
         statement.subject = [
             { name: 'pkg:npm/other@1.2.3', digest: { sha512: TARBALL_SHA512 } },
         ];
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor(statement),
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statement),
             expected: expected(),
         });
         expect(failures).toStrictEqual(['Provenance subject does not name pkg:npm/demo@1.2.3.']);
@@ -209,15 +207,15 @@ describe('verifyProvenanceIdentity', () => {
         statement.subject = [
             { name: 'pkg:npm/%40zsumz%2Fdemo@1.2.3', digest: { sha512: TARBALL_SHA512 } },
         ];
-        expect(verifyProvenanceIdentity({
-            attestations: attestationsFor(statement),
+        expect(verifyProvenanceBundle({
+            bundle: bundleFor(statement),
             expected: { ...expected(), packageName: '@zsumz/demo' },
         })).toStrictEqual([]);
     });
 
     it('rejects a bundle without a signing certificate', () => {
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor(statementV1(), { certificate: false }),
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statementV1(), { certificate: false }),
             expected: expected(),
         });
         expect(failures).toStrictEqual([
@@ -226,8 +224,8 @@ describe('verifyProvenanceIdentity', () => {
     });
 
     it('rejects a workflow run that did not produce the candidate', () => {
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor(statementV1()),
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statementV1()),
             expected: { ...expected(), runId: 99 },
         });
         expect(failures).toHaveLength(1);
@@ -237,35 +235,25 @@ describe('verifyProvenanceIdentity', () => {
     it('skips the run check when no run id is expected', () => {
         const { runId, ...withoutRun } = expected();
         expect(runId).toBe(42);
-        expect(verifyProvenanceIdentity({
-            attestations: attestationsFor(statementV1()),
+        expect(verifyProvenanceBundle({
+            bundle: bundleFor(statementV1()),
             expected: withoutRun,
         })).toStrictEqual([]);
     });
 
     it('reports an unrecognized format instead of crashing', () => {
-        expect(verifyProvenanceIdentity({ attestations: null, expected: expected() }))
-            .toStrictEqual(['attestation format not recognized: no attestation list for demo@1.2.3.']);
-        expect(verifyProvenanceIdentity({ attestations: { attestations: [] }, expected: expected() }))
-            .toStrictEqual(['No attestations are published for demo@1.2.3.']);
-        expect(verifyProvenanceIdentity({
-            attestations: { attestations: [{ predicateType: 'https://example.com/other' }] },
-            expected: expected(),
-        })).toStrictEqual(['No SLSA provenance attestation is published for demo@1.2.3.']);
+        expect(verifyProvenanceBundle({ bundle: null, expected: expected() }))
+            .toStrictEqual([
+                'attestation format not recognized: the provenance bundle carries no signing certificate.',
+                'attestation format not recognized: the provenance payload could not be decoded for demo@1.2.3.',
+            ]);
     });
 
     it('reports an undecodable payload as an unrecognized format', () => {
-        const failures = verifyProvenanceIdentity({
-            attestations: {
-                attestations: [
-                    {
-                        predicateType: 'https://slsa.dev/provenance/v1',
-                        bundle: {
-                            verificationMaterial: { certificate: { rawBytes: 'Zm9v' } },
-                            dsseEnvelope: { payload: 'not-base64-json' },
-                        },
-                    },
-                ],
+        const failures = verifyProvenanceBundle({
+            bundle: {
+                verificationMaterial: { certificate: { rawBytes: 'Zm9v' } },
+                dsseEnvelope: { payload: 'not-base64-json' },
             },
             expected: expected(),
         });
@@ -275,8 +263,8 @@ describe('verifyProvenanceIdentity', () => {
     });
 
     it('reports a statement without a build definition', () => {
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor({
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor({
                 predicateType: 'https://slsa.dev/provenance/v1',
                 subject: [{ name: 'pkg:npm/demo@1.2.3', digest: { sha512: TARBALL_SHA512 } }],
                 predicate: {},
@@ -289,8 +277,8 @@ describe('verifyProvenanceIdentity', () => {
     });
 
     it('reports a statement without a subject', () => {
-        const failures = verifyProvenanceIdentity({
-            attestations: attestationsFor({
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor({
                 predicateType: 'https://slsa.dev/provenance/v1',
                 predicate: statementV1().predicate,
             }),
@@ -302,43 +290,78 @@ describe('verifyProvenanceIdentity', () => {
     });
 });
 
-describe('verifyAuditSignatures', () => {
+describe('verifyAuditProof', () => {
     it('accepts a verified package with a provenance attestation', () => {
-        expect(verifyAuditSignatures(auditReport(), expected())).toStrictEqual([]);
+        const proof = verifyAuditProof(auditReport(), expected());
+        expect(proof.failures).toStrictEqual([]);
+        expect(proof.provenanceBundle).toStrictEqual(bundleFor(statementV1()));
     });
 
     it('rejects invalid signatures', () => {
         const report = auditReport();
         report.invalid = [{ name: 'demo', version: '1.2.3' }];
-        expect(verifyAuditSignatures(report, expected()))
+        expect(verifyAuditProof(report, expected()).failures)
             .toStrictEqual(['npm reported 1 invalid package signatures.']);
     });
 
     it('rejects missing signatures', () => {
         const report = auditReport();
         report.missing = [{ name: 'demo', version: '1.2.3' }];
-        expect(verifyAuditSignatures(report, expected()))
+        expect(verifyAuditProof(report, expected()).failures)
             .toStrictEqual(['npm reported 1 missing package signatures.']);
     });
 
     it('rejects a report that does not cover the package', () => {
         const report = auditReport();
         report.verified = [{ name: 'demo', version: '1.2.2' }];
-        expect(verifyAuditSignatures(report, expected()))
+        expect(verifyAuditProof(report, expected()).failures)
             .toStrictEqual(['npm did not verify the registry signature for demo@1.2.3.']);
+    });
+
+    it('rejects duplicate verified package entries', () => {
+        const report = auditReport();
+        const entries = report.verified as unknown[];
+        report.verified = [...entries, entries[0]];
+        expect(verifyAuditProof(report, expected()).failures[0])
+            .toContain('duplicate verified entries');
     });
 
     it('rejects a verified package without a provenance attestation', () => {
         const report = auditReport();
         report.verified = [{ name: 'demo', version: '1.2.3', attestations: {} }];
-        expect(verifyAuditSignatures(report, expected()))
+        expect(verifyAuditProof(report, expected()).failures)
             .toStrictEqual(['npm did not verify a provenance attestation for demo@1.2.3.']);
     });
 
+    it('rejects multiple verified provenance bundles', () => {
+        const report = auditReport();
+        const entry = (report.verified as Array<Record<string, unknown>>)[0];
+        if (entry !== undefined) {
+            entry.attestationBundles = [
+                ...verifiedBundles(),
+                { predicateType: 'https://slsa.dev/provenance/v1', bundle: bundleFor(statementV1()) },
+            ];
+        }
+        expect(verifyAuditProof(report, expected()).failures[0])
+            .toContain('multiple verified provenance bundles');
+    });
+
+    it('rejects a malformed verified provenance bundle', () => {
+        const report = auditReport();
+        const entry = (report.verified as Array<Record<string, unknown>>)[0];
+        if (entry !== undefined) {
+            entry.attestationBundles = [
+                { predicateType: 'https://slsa.dev/provenance/v1', bundle: null },
+            ];
+        }
+        expect(verifyAuditProof(report, expected()).failures[0])
+            .toContain('invalid verified provenance bundle');
+    });
+
     it('reports an unrecognized audit format', () => {
-        expect(verifyAuditSignatures(null, expected()))
+        expect(verifyAuditProof(null, expected()).failures)
             .toStrictEqual(['attestation format not recognized: npm audit signatures output was not an object.']);
-        expect(verifyAuditSignatures({}, expected()))
+        expect(verifyAuditProof({}, expected()).failures)
             .toStrictEqual(['attestation format not recognized: npm audit signatures reported no verified list.']);
     });
 });
@@ -390,78 +413,64 @@ describe('runAuditSignatures', () => {
 });
 
 describe('verifyRegistryProvenance', () => {
-    it('passes when npm and the registry agree on the identity', async () => {
-        const urls: string[] = [];
-        const fetchJson: FetchJson = async (url) => {
-            urls.push(url);
-            return Promise.resolve({ status: 200, body: attestationsFor(statementV1()) });
-        };
+    it('passes when npm verifies a bundle with the expected identity', () => {
         const exec: CommandRunner = (): CommandResult => ({
             stdout: JSON.stringify(auditReport()),
             stderr: '',
         });
-        const result = await verifyRegistryProvenance({
+        const result = verifyRegistryProvenance({
             exec,
-            fetchJson,
             installDir: '/tmp/audit',
-            registry: 'https://registry.npmjs.org',
             expected: expected(),
         });
         expect(result).toStrictEqual({ ok: true });
-        expect(urls).toStrictEqual([
-            'https://registry.npmjs.org/-/npm/v1/attestations/demo@1.2.3',
-        ]);
     });
 
-    it('collects audit and identity failures together', async () => {
-        const fetchJson: FetchJson = async () => Promise.resolve({
-            status: 200,
-            body: attestationsFor(statementV1()),
-        });
+    it('collects audit and identity failures from one proof', () => {
         const exec: CommandRunner = (): CommandResult => ({ stdout: '{}', stderr: '' });
-        const result = await verifyRegistryProvenance({
+        const result = verifyRegistryProvenance({
             exec,
-            fetchJson,
             installDir: '/tmp/audit',
-            registry: 'https://registry.npmjs.org',
             expected: { ...expected(), workflowPath: '.github/workflows/other.yml' },
         });
         expect(result.ok).toBe(false);
-        expect(result.ok ? [] : result.failures).toHaveLength(2);
+        expect(result.ok ? [] : result.failures).toHaveLength(1);
     });
 
-    it('fails closed when the registry publishes no attestations', async () => {
-        const fetchJson: FetchJson = async () => Promise.resolve({ status: 404, body: null });
+    it('fails closed when npm returns no verified bundle', () => {
+        const report = auditReport();
+        report.verified = [{
+            name: 'demo',
+            version: '1.2.3',
+            attestations: { provenance: { predicateType: 'https://slsa.dev/provenance/v1' } },
+        }];
         const exec: CommandRunner = (): CommandResult => ({
-            stdout: JSON.stringify(auditReport()),
+            stdout: JSON.stringify(report),
             stderr: '',
         });
-        const result = await verifyRegistryProvenance({
+        const result = verifyRegistryProvenance({
             exec,
-            fetchJson,
             installDir: '/tmp/audit',
-            registry: 'https://registry.npmjs.org',
             expected: expected(),
         });
         expect(result.ok).toBe(false);
-        expect(result.ok ? [] : result.failures[0]).toContain('no attestation list');
+        expect(result.ok ? [] : result.failures[0]).toContain('no verified attestation bundles');
     });
 
-    it('reports a failing attestation download', async () => {
-        const fetchJson: FetchJson = async () => Promise.resolve({ status: 500, body: null });
+    it('rejects identity from the exact verified bundle', () => {
+        const attacker = statementV1();
+        setWorkflow(attacker, 'repository', 'https://github.com/attacker/demo');
         const exec: CommandRunner = (): CommandResult => ({
-            stdout: JSON.stringify(auditReport()),
+            stdout: JSON.stringify(auditReport(attacker)),
             stderr: '',
         });
-        const result = await verifyRegistryProvenance({
+        const result = verifyRegistryProvenance({
             exec,
-            fetchJson,
             installDir: '/tmp/audit',
-            registry: 'https://registry.npmjs.org',
             expected: expected(),
         });
         expect(result.ok).toBe(false);
-        expect(result.ok ? [] : result.failures[0]).toContain('Attestation download failed');
+        expect(result.ok ? [] : result.failures[0]).toContain('attacker/demo');
     });
 });
 

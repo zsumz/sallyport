@@ -40,8 +40,8 @@ Use `check --remote` to audit GitHub and npm posture. Missing proof is
 ## Model
 
 ```text
-signed tag → pack + smoke → stage with OIDC → approve with 2FA
-           → verify public bytes → immutable GitHub Release
+signed tag → pack → seal → smoke exact bytes → stage with OIDC
+           → approve with 2FA → verify → immutable GitHub Release
 ```
 
 CI can stage a package. It cannot publish one. sallyport finishes only after the
