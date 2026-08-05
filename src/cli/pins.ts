@@ -1,10 +1,8 @@
-// The quoin release process rewrites QUOIN_WORKFLOW_SHA to the last
-// commit that touched .github/workflows/ (a commit cannot reference its own
-// SHA; see docs/releasing.md). Until then it stays at the placeholder so
-// `init` refuses to emit a caller workflow pinned to nothing.
+// The quoin release process pins the last commit that touched the reusable
+// workflows. A commit cannot reference its own SHA; see docs/releasing.md.
 export const PLACEHOLDER_WORKFLOW_SHA = '0000000000000000000000000000000000000000';
 
-export const QUOIN_WORKFLOW_SHA: string = PLACEHOLDER_WORKFLOW_SHA;
+export const QUOIN_WORKFLOW_SHA = '219be03b4d9cddec6b13f505bc142432cd7a9c89';
 
 const COMMIT_PATTERN = /^[0-9a-fA-F]{40}$/u;
 

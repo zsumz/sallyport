@@ -1,16 +1,14 @@
 # Releasing quoin
 
-quoin releases itself with its own protocol: staged privately on npm,
-approved with maintainer 2FA, verified from the public registry, then
-published as an immutable GitHub Release. Version `0.1.0` is the one
-exception, because the protocol cannot bootstrap itself.
+quoin releases itself with its own protocol: stage, approve, verify, release.
+The first alpha is the sole exception because a package cannot configure npm
+staging before it exists.
 
-## Bootstrap exception (0.1.0 only)
+## Bootstrap alpha
 
 Staged publishing and trusted-publisher configuration both require the npm
 package to already exist, so a completely new package needs one initial
-publication outside the protocol. That publication gets none of quoin's
-guarantees; see
+publication outside the protocol. It gets none of quoin's guarantees; see the
 [threat model](./threat-model.md#not-defended).
 
 Before bootstrapping, the acceptance work must be done: the live fixture
@@ -18,11 +16,10 @@ package `@zsumz/quoin-fixture` has exercised stage and reject cycles,
 and at least one full canary has run end to end — stage, approve, verify,
 immutable release, replay.
 
-### 1. Build and verify 0.1.0
+### 1. Verify
 
-Start from a clean, current default branch with `package.json` and
-`package-lock.json` at `0.1.0`, and notes committed at
-`docs/releases/v0.1.0.md`.
+Start from a clean, current default branch at `0.1.0-alpha.0`, with notes at
+`docs/releases/v0.1.0-alpha.0.md`.
 
 Bake the reusable-workflow pin into the CLI: set `QUOIN_WORKFLOW_SHA` in
 `src/cli/pins.ts` to the SHA of the last commit that touched
@@ -36,49 +33,47 @@ npm ci
 npm run release:check
 ```
 
-Pack once and smoke that exact tarball, the same way the protocol would:
+Pack once, then smoke that exact tarball:
 
 ```sh
 npm pack --ignore-scripts
 ```
 
 ```sh
-QUOIN_TARBALL="$PWD/quoin-0.1.0.tgz" \
+QUOIN_TARBALL="$PWD/quoin-0.1.0-alpha.0.tgz" \
 QUOIN_PACKAGE=quoin \
-QUOIN_VERSION=0.1.0 \
-QUOIN_DIST_TAG=latest \
+QUOIN_VERSION=0.1.0-alpha.0 \
+QUOIN_DIST_TAG=alpha \
 npm run release:smoke
 ```
 
 Record the tarball's SHA-256. It must match everything published afterward.
 
 ```sh
-shasum -a 256 quoin-0.1.0.tgz
+shasum -a 256 quoin-0.1.0-alpha.0.tgz
 ```
 
-### 2. Sign the tag and create the GitHub Release
+### 2. Sign
 
 ```sh
-git tag --sign v0.1.0 -m "quoin v0.1.0"
-git push origin v0.1.0
+git tag --sign v0.1.0-alpha.0 -m "quoin v0.1.0-alpha.0"
+git push origin v0.1.0-alpha.0
 ```
 
-Create the immutable GitHub Release for that signed tag from the committed
-release notes, attaching the packed tarball and its SHA-256.
-
-### 3. Publish manually with 2FA
+### 3. Publish
 
 Publish the exact tarball that was packed and smoked above — not a fresh pack.
 npm prompts for the second factor.
 
 ```sh
-npm publish quoin-0.1.0.tgz --access public
+QUOIN_TARBALL="$PWD/quoin-0.1.0-alpha.0.tgz" npm run publish:alpha
 ```
 
-Confirm the published version, `latest`, and the registry integrity against
-the recorded SHA-256 before continuing.
+Confirm the published version, `alpha`, and the registry integrity against
+the recorded SHA-256. Then create the immutable GitHub Release from the signed
+tag, attaching the tarball and its SHA-256.
 
-### 4. Configure the stage-only trusted publisher
+### 4. Configure staging
 
 ```sh
 npm trust github quoin \
@@ -88,22 +83,20 @@ npm trust github quoin \
   --allow-stage-publish
 ```
 
-### 5. Remove token publishing
+### 5. Remove tokens
 
 Set Publishing access to "Require two-factor authentication and disallow
 tokens" and delete any automation token used for the bootstrap. From this
 point there is no npm publishing credential anywhere.
 
-### 6. Add the repository's own caller workflow
+### 6. Install quoin
 
-The caller workflow is added at bootstrap time, once the package and its
-trusted publisher exist. Generate it with the just-published CLI, pinned to
-the `v0.1.0` commit, so quoin consumes itself exactly as a consumer
-does:
+Generate the caller workflow with the published alpha, pinned to the alpha
+tag commit:
 
 ```sh
-npx quoin init --strict
-npx quoin check
+npx quoin@alpha init --strict
+npx quoin@alpha check
 ```
 
 This is the `.github/workflows/quoin.yml` caller referenced by
@@ -111,10 +104,9 @@ This is the `.github/workflows/quoin.yml` caller referenced by
 `release.yml` slot. The reusable `stage.yml` and `finalize.yml` stay where
 they are — they are the workflows the caller calls.
 
-### 7. Release 0.1.1 through the protocol
+### 7. Prove self-hosting
 
-`0.1.1` is the first self-hosted quoin release. From here, follow the
-sections below.
+Release `0.1.0-alpha.1` through quoin. From here, follow the sections below.
 
 ## One-time setup
 
@@ -135,7 +127,7 @@ and blocked force pushes. Protect `v*` tags. Keep immutable Releases enabled.
 2. Update `package.json` and `package-lock.json` to the same version.
 3. Add concise notes at `docs/releases/v<version>.md`.
 4. Run `npm run release:check`.
-5. Run `npx quoin check`.
+5. Run `npx quoin@alpha check`.
 6. Commit as `chore(release): v<version>` with the configured OpenPGP key.
 7. Push and wait for the complete CI matrix.
 

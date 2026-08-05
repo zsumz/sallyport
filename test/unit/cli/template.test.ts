@@ -3,6 +3,7 @@ import {
     isPlaceholderSha,
     normalizeCommitSha,
     PLACEHOLDER_WORKFLOW_SHA,
+    QUOIN_WORKFLOW_SHA,
 } from '../../../src/cli/pins.ts';
 import {
     detectProfile,
@@ -101,9 +102,11 @@ describe('workflow analysis', () => {
 });
 
 describe('pinned workflow commit', () => {
-    it('ships as the placeholder until a release bakes the real commit in', () => {
+    it('recognizes the placeholder and ships a real commit', () => {
         expect(isPlaceholderSha(PLACEHOLDER_WORKFLOW_SHA)).toBe(true);
         expect(isPlaceholderSha(FIXTURE_SHA)).toBe(false);
+        expect(normalizeCommitSha(QUOIN_WORKFLOW_SHA)).toBe(QUOIN_WORKFLOW_SHA);
+        expect(isPlaceholderSha(QUOIN_WORKFLOW_SHA)).toBe(false);
     });
 
     it('normalizes and validates commit shas', () => {

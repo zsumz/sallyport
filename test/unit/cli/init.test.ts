@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SIGNING_KEY_FILE } from '../../../src/cli/check.ts';
 import { runInit, type InitOptions } from '../../../src/cli/init.ts';
+import { QUOIN_WORKFLOW_SHA } from '../../../src/cli/pins.ts';
 import {
     CALLER_WORKFLOW_FILE,
     FINALIZE_WORKFLOW,
@@ -127,10 +128,11 @@ describe('runInit', () => {
             .rejects.toThrow('--sha must be a full 40-character commit SHA');
     });
 
-    it('refuses to generate while the pinned commit is the placeholder', async () => {
-        await expect(runInit(options({ sha: undefined })))
-            .rejects.toThrow(/carries no pinned workflow commit/u);
-        expect(existsSync(workflowFile())).toBe(false);
+    it('uses the bundled workflow commit when no override is supplied', async () => {
+        await runInit(options({ sha: undefined }));
+
+        expect(workflowRef(generated(), STAGE_WORKFLOW)).toBe(QUOIN_WORKFLOW_SHA);
+        expect(workflowRef(generated(), FINALIZE_WORKFLOW)).toBe(QUOIN_WORKFLOW_SHA);
     });
 
     it('refuses to overwrite an existing caller workflow', async () => {

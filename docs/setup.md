@@ -9,7 +9,7 @@ what each setting protects.
 From the repository root:
 
 ```sh
-npx quoin init --strict
+npx quoin@alpha init --strict
 ```
 
 `init` reads `package.json` and `package-lock.json`, detects the GitHub
@@ -24,7 +24,7 @@ command and the environment checklist, and finishes by running
 Use plain `init` for the standard profile:
 
 ```sh
-npx quoin init
+npx quoin@alpha init
 ```
 
 `init` does not invent a smoke test. Writing `release:smoke` is the consumer's
@@ -99,7 +99,7 @@ Documented, not mutated by v0.1.0. Confirm each:
 ## 7. Verify
 
 ```sh
-npx quoin check
+npx quoin@alpha check
 ```
 
 `check` inspects local deterministic state only and prints one line per
@@ -123,13 +123,13 @@ PASS no direct npm publish workflow exists
 For CI or scripting:
 
 ```sh
-npx quoin check --json
+npx quoin@alpha check --json
 ```
 
 ## Upgrading
 
 ```sh
-npx quoin init --upgrade
+npx quoin@alpha init --upgrade
 ```
 
 `--upgrade` atomically updates both reusable-workflow SHAs so stage and
