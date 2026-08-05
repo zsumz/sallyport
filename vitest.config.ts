@@ -16,10 +16,10 @@ export default defineConfig({
             ...(enforceCoverageThresholds
                 ? {
                     thresholds: {
-                        statements: 90,
-                        branches: 85,
-                        functions: 90,
-                        lines: 90,
+                        statements: 93,
+                        branches: 87,
+                        functions: 94,
+                        lines: 93,
                     },
                 }
                 : {}),

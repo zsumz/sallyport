@@ -24,6 +24,13 @@ Start from a clean, current default branch with `package.json` and
 `package-lock.json` at `0.1.0`, and notes committed at
 `docs/releases/v0.1.0.md`.
 
+Bake the reusable-workflow pin into the CLI: set `QUOIN_WORKFLOW_SHA` in
+`src/cli/pins.ts` to the SHA of the last commit that touched
+`.github/workflows/`. A commit cannot reference its own SHA, so the release
+commit may change only the version, the pin, and the release notes — never
+the workflows. Until a release bakes that constant, `init` requires an
+explicit `--sha <commit>`.
+
 ```sh
 npm ci
 npm run release:check
