@@ -21,7 +21,6 @@
     "SECURITY.md",
     "quoin-logo.svg",
     "dist/**/*.js",
-    "dist/**/*.d.ts",
     "templates/",
     "schemas/",
     "docs/"

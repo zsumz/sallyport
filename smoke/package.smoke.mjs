@@ -55,6 +55,7 @@ smoke.suite('quoin package', { tags: ['package'] }, async (t) => {
                 'package/quoin-logo.svg',
                 'package/dist/cli/main.js',
                 'package/dist/cli/pins.js',
+                'package/docs/architecture.md',
                 'package/docs/protocol.md',
                 'package/docs/recovery.md',
                 'package/docs/setup.md',
@@ -71,6 +72,7 @@ smoke.suite('quoin package', { tags: ['package'] }, async (t) => {
             .archive(tarball)
             .not.toContainEntries([
                 'package/src/cli/main.ts',
+                'package/dist/cli/main.d.ts',
                 'package/test/tsconfig.json',
                 'package/.github/workflows/stage.yml',
                 'package/vitest.config.ts',
