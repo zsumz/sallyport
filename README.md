@@ -22,6 +22,8 @@
   <a href="./docs/setup.md">Setup</a>
   <span> · </span>
   <a href="./docs/protocol.md">Protocol</a>
+  <span> · </span>
+  <a href="./docs/architecture.md">Architecture</a>
 </p>
 
 <br>
@@ -104,7 +106,19 @@ gh workflow run quoin.yml -f candidate_run_id=<run-id>
 
 ## Guides
 
-[Setup](./docs/setup.md) · [Protocol](./docs/protocol.md) · [Recovery](./docs/recovery.md) · [Threat model](./docs/threat-model.md) · [Releasing quoin](./docs/releasing.md) · [Security](./SECURITY.md)
+[Setup](./docs/setup.md) · [Protocol](./docs/protocol.md) · [Architecture](./docs/architecture.md) · [Recovery](./docs/recovery.md) · [Threat model](./docs/threat-model.md) · [Releasing quoin](./docs/releasing.md) · [Security](./SECURITY.md)
+
+## Development
+
+```sh
+npm ci
+npm run validate
+npm run release:check
+```
+
+quoin uses `eslint-config-rubric`, a 150-line source-module ceiling, pure
+facades, one-way source layers, and a cycle-free runtime graph. The rules are
+executable; see [Architecture](./docs/architecture.md).
 
 ## Support
 

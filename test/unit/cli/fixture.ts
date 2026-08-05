@@ -187,7 +187,7 @@ export function initGitRepository(dir: string, remote: string, version: string):
     const env = gitEnvironment();
     runCommand('git', ['init', '-b', 'main'], { cwd: dir, env });
     runCommand('git', ['config', 'user.email', 'quoin@example.com'], { cwd: dir, env });
-    runCommand('git', ['config', 'user.name', 'Quoin Fixture'], { cwd: dir, env });
+    runCommand('git', ['config', 'user.name', 'quoin fixture'], { cwd: dir, env });
     runCommand('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir, env });
     runCommand('git', ['config', 'tag.gpgsign', 'false'], { cwd: dir, env });
     runCommand('git', ['add', '-A'], { cwd: dir, env });
@@ -209,9 +209,9 @@ export function gitEnvironment(): Record<string, string | undefined> {
         ...process.env,
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_CONFIG_SYSTEM: '/dev/null',
-        GIT_AUTHOR_NAME: 'Quoin Fixture',
+        GIT_AUTHOR_NAME: 'quoin fixture',
         GIT_AUTHOR_EMAIL: 'quoin@example.com',
-        GIT_COMMITTER_NAME: 'Quoin Fixture',
+        GIT_COMMITTER_NAME: 'quoin fixture',
         GIT_COMMITTER_EMAIL: 'quoin@example.com',
     };
 }
