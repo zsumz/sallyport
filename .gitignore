@@ -10,3 +10,4 @@ __MACOSX/
 *.tsbuildinfo
 smoke-results.json
 smoke-results.xml
+.claude/

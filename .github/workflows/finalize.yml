@@ -133,6 +133,9 @@ jobs:
             --repository "$GITHUB_REPOSITORY"
             --repository-id "$GITHUB_REPOSITORY_ID"
             --default-branch "$QUOIN_DEFAULT_BRANCH"
+            # The version is already public here; only stage requires
+            # registry absence.
+            --mode finalize
           )
           if [ -n "$QUOIN_SIGNER_FINGERPRINT" ]; then
             args+=(--signer-fingerprint "$QUOIN_SIGNER_FINGERPRINT")
