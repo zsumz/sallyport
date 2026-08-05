@@ -14,7 +14,7 @@ import {
 } from '../../../registry/download.ts';
 import { compareRegistryIntegrity, sha256Hex, type PackedManifest } from '../../../registry/integrity.ts';
 import type { ExpectedProvenance } from '../../../registry/provenance.ts';
-import { optionalValue, parseArgv, requireValue } from '../../args.ts';
+import { hasFlag, optionalValue, parseArgv, requireValue } from '../../args.ts';
 import { ensureDirectory, failure, jsonDocument } from '../../support.ts';
 import { parseProfile } from '../../template.ts';
 import type { CliEffects } from '../effects.ts';
@@ -30,10 +30,12 @@ export async function verifyPublicCommand(
     effects: CliEffects,
 ): Promise<void> {
     const parsed = parseArgv(argv, {
-        strings: ['consumer', 'candidate-dir', 'output', 'profile', 'signer-fingerprint'],
+        booleans: ['skip-smoke'],
+        strings: ['consumer', 'candidate-dir', 'notes', 'output', 'profile', 'signer-fingerprint'],
     });
     const consumerDir = path.resolve(requireValue(parsed, 'consumer'));
     const candidateDir = path.resolve(requireValue(parsed, 'candidate-dir'));
+    const notesFile = path.resolve(requireValue(parsed, 'notes'));
     const outputDir = path.resolve(requireValue(parsed, 'output'));
     const profile = parseProfile(optionalValue(parsed, 'profile') ?? 'standard');
     const requestedFingerprint = optionalValue(parsed, 'signer-fingerprint');
@@ -87,23 +89,30 @@ export async function verifyPublicCommand(
         runId: receipt.run.id,
     };
     const provenance = await verifyProvenance(effects, outputDir, receipt, registry, expected);
-    const smoke = await runReleaseSmoke({
-        consumerDir,
-        tarball: Buffer.from(publicTarball),
-        directory: smokeDirectory(effects, PUBLIC_SMOKE_DIRECTORY),
-        packageName: receipt.package.name,
-        version: receipt.package.version,
-        distTag: receipt.package.distTag,
-        effects,
-    });
-    const failures = [...provenance.failures, ...smoke.failures];
+    const smokeFailures = hasFlag(parsed, 'skip-smoke')
+        ? []
+        : (await runReleaseSmoke({
+            consumerDir,
+            tarball: Buffer.from(publicTarball),
+            directory: smokeDirectory(effects, PUBLIC_SMOKE_DIRECTORY),
+            packageName: receipt.package.name,
+            version: receipt.package.version,
+            distTag: receipt.package.distTag,
+            effects,
+        })).failures;
+    const failures = [...provenance.failures, ...smokeFailures];
     if (failures.length > 0) {
         throw failure('Public verification failed:', failures);
     }
 
+    const notes = await readFile(notesFile);
+    if (notes.byteLength === 0) {
+        throw failure('Public verification failed:', ['release notes must not be empty.']);
+    }
     const record = createReleaseRecord({
         receipt,
         candidateReceiptSha256: sha256Hex(receiptBytes),
+        releaseNotesSha256: sha256Hex(notes),
         registryDigest: comparison.digest,
         signatureVerified: provenance.signatureVerified,
         provenanceVerified: provenance.provenanceVerified,

@@ -16,7 +16,7 @@ export function hashTarball(buffer: Buffer): TarballDigest {
     };
 }
 
-// The authoritative tarball is copied before package code runs; the copy must come back identical.
+// Smoke code receives a copy; the bytes supplied to that smoke must come back identical.
 export function verifyTarballUnchanged(
     input: VerifyTarballUnchangedInput,
 ): TarballUnchangedResult {

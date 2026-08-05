@@ -70,14 +70,15 @@ npm ci
 npm run release:check
 ```
 
-sallyport then performs the one authoritative release pack:
+sallyport then performs the one release pack:
 
 ```sh
 npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/sallyport"
 ```
 
-The release candidate is packed exactly once, by sallyport, and reused from then
-onward.
+The release candidate is packed exactly once. Because package code ran in that
+job, the bytes become authoritative only after the fresh `seal` job inspects
+and hashes the downloaded artifact.
 
 ### `release:smoke`
 
@@ -133,6 +134,7 @@ jobs:
   stage:
     if: github.event_name == 'push'
     permissions:
+      actions: read
       contents: read
       id-token: write
     uses: zsumz/sallyport/.github/workflows/stage.yml@0123456789abcdef0123456789abcdef01234567
@@ -222,12 +224,12 @@ Rules:
 
 ## 6. Stage flow — `stage.yml`
 
-Two jobs:
+Three jobs:
 
 ```text
-prepare ────────────> stage
-unprivileged          npm OIDC
-package code          no package code
+prepare ─────> seal ─────> stage
+package code    clean        npm OIDC
+no authority    receipt      no package code
 ```
 
 ### Job 1: `prepare`
@@ -238,7 +240,8 @@ Permissions: `contents: read` only. No OIDC. No write access.
 be a tag, the tag must equal `v<package-version>`, the repository must match
 `package.json` `repository`, the package must be public, the repository must
 contain one root package, and `package-lock.json` must be present. The tag
-must be reachable from the default branch. In strict mode, the annotated
+must resolve to the event commit and be reachable from the exact default branch
+ref fetched into `refs/sallyport/default-branch`. In strict mode, the annotated
 signed tag and expected fingerprint must verify.
 
 **Step B — check out both repositories.** The consumer is checked out at its
@@ -274,19 +277,29 @@ required release notes must exist.
 `npm run release:check`. No secrets are present.
 
 **Step F — pack once.** `npm pack --ignore-scripts --json`, renaming the
-artifact to the fixed safe name `package.tgz`. sallyport then reads the packed
-`package/package.json`, revalidates name and version from inside the tarball,
-records packed file metadata, and computes SHA-256, SHA-512, npm SRI
-integrity, and byte length. Unsafe archive paths and malformed metadata must
-be rejected.
+artifact to the fixed safe name `package.tgz`. This is an untrusted byte output;
+the fresh `seal` job performs the authoritative manifest inspection and digest.
 
-**Step G — smoke the exact candidate.** sallyport copies
+**Step G — smoke the emitted candidate.** sallyport copies
 `package.tgz → smoke-package.tgz`, sets the `SALLYPORT_*` environment
 contract, runs `npm run release:smoke`, and verifies by hash that the copy was
-not modified. The authoritative `package.tgz` is never handed to package code
-after its digest is recorded.
+not modified during the smoke. This is useful package behavior evidence, not a
+trusted assertion about the bytes; only `seal` can make them authoritative.
 
-**Step H — produce the candidate receipt** (`candidate.json`):
+`prepare` uploads only `package.tgz`. Its artifact ID, not its name, is handed
+to the next job. No metadata written by package code is trusted.
+
+### Job 2: `seal`
+
+Permissions: `actions: read`, `contents: read`. Fresh runner. No OIDC, package
+install, package script, or consumer code.
+
+`seal` downloads the tarball by immutable artifact ID, checks out the event
+commit and pinned sallyport implementation from scratch, fetches the tag and
+default branch into private refs, and repeats source, ancestry, commit, and
+signature verification. It inspects `package/package.json` inside the tarball
+and compares it with the exact source commit. Only then does it produce the
+authoritative candidate receipt (`candidate.json`):
 
 ```json
 {
@@ -301,10 +314,12 @@ after its digest is recorded.
 }
 ```
 
-The uploaded artifact is named `sallyport-candidate-<tag-commit-sha>` and
-must contain exactly `package.tgz` and `candidate.json`. Retention is 90 days.
+The sealed artifact is named
+`sallyport-candidate-<tag-commit-sha>-<run-attempt>`, contains exactly
+`package.tgz` and `candidate.json`, and is retained for 90 days. Its immutable
+artifact ID is handed to `stage`.
 
-### Job 2: `stage`
+### Job 3: `stage`
 
 Permissions: `id-token: write`. Environment: `npm-stage`.
 
@@ -313,10 +328,10 @@ scripts, no local Actions, no cache, no inherited secrets, no npm token, no
 repository write permission, and no shell command assembled from unvalidated
 package values.
 
-It runs only: pinned official setup and artifact-download Actions; exact Node
-and npm version assertions; candidate JSON schema validation using embedded
-dependency-free Node code; candidate digest verification; and the staged
-publish, invoked as an argument array:
+It downloads only the sealed artifact ID. Embedded dependency-free Node code
+recomputes the tarball digest and independently binds repository name and ID,
+default branch, tag, commit, run ID and attempt, workflow SHA, profile, signer,
+version, and derived dist-tag to trusted GitHub context. It then invokes:
 
 ```text
 npm stage publish package.tgz --tag <validated-dist-tag> --access public --ignore-scripts --provenance --json
@@ -349,18 +364,20 @@ Only the maintainer may make it public.
 
 ## 8. Finalize flow — `finalize.yml`
 
-Two jobs:
+Three jobs:
 
 ```text
-verify ────────────> release
-unprivileged         GitHub contents write
-package code         no package code
+verify_core ─────┬────> release
+clean + sealed   │      GitHub contents write
+                 │      no package code
+public_smoke ────┘
+package code; no trusted outputs
 ```
 
 The workflow receives only `candidate_run_id`, `profile`, and
 `signer_fingerprint`. Everything else must derive from the candidate receipt.
 
-### Job 1: `verify`
+### Job 1: `verify_core`
 
 Permissions: `actions: read`, `contents: read`. No OIDC. No write access.
 
@@ -371,9 +388,10 @@ completed successfully; that the candidate artifact is present; that the
 candidate's reusable-workflow SHA equals the currently pinned finalizer SHA;
 that the repository ID matches; and that the tag and commit match the receipt.
 
-**Step B — reverify source identity.** Check out the exact tag with
-`persist-credentials: false` and repeat tag/version matching, default-branch
-ancestry, release-note existence, and, when strict, signature verification.
+**Step B — reverify source identity.** Check out the receipt's exact commit
+with `persist-credentials: false`, fetch the tag separately, require its peeled
+target to equal that commit, and repeat default-branch ancestry, release-note,
+and strict signature verification against private refs.
 
 **Step C — wait for npm registry convergence.** Only temporary states may be
 retried: version not yet visible, dist-tag not yet visible, tarball
@@ -389,12 +407,10 @@ and version; the registry signature must be valid; and an npm provenance
 attestation must exist and identify the expected GitHub repository and
 workflow run.
 
-**Step E — smoke the public tarball.** Install the consumer's dev
-dependencies, point the `SALLYPORT_*` environment contract at the public
-registry tarball, and run `npm run release:smoke`.
-
-**Step F — build the release bundle:** `package.tgz`, `candidate.json`,
-`release.json`, `SHA256SUMS`, and `RELEASE_NOTES.md`.
+**Step E — seal the release bundle.** Before any consumer dependency or script
+runs, build and upload `package.tgz`, `candidate.json`, `release.json`,
+`SHA256SUMS`, and `RELEASE_NOTES.md`. Every file except the checksum file is
+listed in `SHA256SUMS`; the immutable bundle artifact ID is a job output.
 
 `release.json`:
 
@@ -403,6 +419,7 @@ registry tarball, and run `npm run release:smoke`.
   "schema": 1,
   "protocol": "sallyport/0.1",
   "candidateReceiptSha256": "...",
+  "releaseNotesSha256": "...",
   "package": { "name": "smoque", "version": "0.1.2", "distTag": "latest" },
   "candidate": { "sha256": "...", "sha512": "..." },
   "registry": { "sha256": "...", "sha512": "...", "integrityVerified": true, "signatureVerified": true, "provenanceVerified": true },
@@ -410,20 +427,34 @@ registry tarball, and run `npm run release:smoke`.
 }
 ```
 
-### Job 2: `release`
+### Job 2: `public_smoke`
 
-Permissions: `contents: write`. Environment: `github-release`.
+Permissions: `actions: read`, `contents: read`. No OIDC or write access.
+
+This separate job downloads the sealed bundle by artifact ID, checks out the
+exact consumer commit, installs dependencies, and runs `release:smoke` against
+a copy of the sealed public bytes. It uploads no artifact and exposes no output;
+the release job consumes only its success status.
+
+### Job 3: `release`
+
+Permissions: `actions: read`, `contents: write`. Environment: `github-release`.
 
 This job has no repository checkout, no dependency installation, no caller
 code, no package script, no OIDC, no npm access, and no arbitrary release
 command.
 
-It downloads the already verified release bundle, rechecks the manifest and
-hashes, then publishes draft-first:
+It downloads the exact bundle artifact ID from `verify_core`, resolves the
+originating sealed-candidate artifact from the candidate run, downloads that
+artifact by ID, and requires byte-for-byte receipt and tarball equality. It
+then rechecks every hash and independently binds the run, attempt, repository,
+workflow, workflow SHA, tag, commit, profile, and signer to GitHub context. It
+re-peels the tag immediately before each write, then publishes draft-first:
 
 1. Create a draft GitHub Release for the existing tag.
 2. Add the committed release notes.
-3. Attach `package.tgz`, `candidate.json`, `release.json`, and `SHA256SUMS`.
+3. Attach `package.tgz`, `candidate.json`, `release.json`,
+   `RELEASE_NOTES.md`, and `SHA256SUMS`.
 4. Publish the draft.
 
 Immutable releases fix assets and the tag at publication, so the draft-first
@@ -438,6 +469,8 @@ order is required rather than cosmetic.
 | Matching published release    | Successful no-op                     |
 | Same tag, different receipt   | Hard failure                         |
 | Same tag, different assets    | Hard failure                         |
+| Same tag, different title     | Hard failure                         |
+| Same tag, different notes     | Hard failure                         |
 | npm package missing           | Fail without writing                 |
 | npm bytes differ              | Critical failure                     |
 | Provenance missing or invalid | Fail without writing                 |
@@ -452,14 +485,16 @@ overwrite a conflicting GitHub Release. See [recovery](./recovery.md).
    credentials.
 2. Package code never runs with npm publishing authority. `prepare` runs
    package code and has no OIDC; `stage` has OIDC and runs no package code.
-3. Package code never runs with GitHub Release write authority. `verify` runs
-   smoke code and cannot write; `release` can write and runs no package code.
-4. One authoritative tarball — created once, staged, downloaded again from the
-   public registry, with byte-for-byte equality required.
+3. Package code never runs with GitHub Release write authority. `public_smoke`
+   runs package code and exports no trusted output; `release` can write and
+   runs no package code.
+4. One authoritative tarball — packed once, sealed on a fresh runner, staged,
+   downloaded again from the public registry, and compared byte for byte.
 5. CI may stage but may never publish directly; the trusted publisher is
    restricted to `--allow-stage-publish`.
 6. Human approval is unavoidable, and requires 2FA.
-7. Central code is immutable per consumer, pinned by full commit SHA.
+7. Central code is immutable per consumer, pinned by the full implementation
+   checkpoint SHA; CI rejects runtime changes above that checkpoint.
 8. Release metadata is derived, never supplied by workflow inputs.
 9. External actions are immutable, pinned by full commit SHA.
 10. Public bytes are independently verified before any GitHub Release is

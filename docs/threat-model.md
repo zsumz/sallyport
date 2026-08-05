@@ -17,18 +17,26 @@ sallyport splits authority so that package code never holds any.
 
 `prepare` runs package code — `npm ci`, `release:check`, the pack, and
 `release:smoke` — with `contents: read` only. It has no OIDC token, no write
-permission, and no secrets. Nothing it produces can publish.
+permission, and no secrets. It may emit only an untrusted tarball.
+
+A fresh `seal` runner downloads that tarball by immutable artifact ID and runs
+no package or dependency code. It checks out the exact commit, tag, default
+branch, and pinned sallyport implementation again; verifies the source and
+packed manifest; and alone authors `candidate.json`. Package code can choose
+its emitted bytes, but it cannot forge the receipt or trusted context.
 
 `stage` holds the OIDC credential and runs no package code at all: no caller
 checkout, no sallyport checkout, no `npm ci`, no `npm run`, no local Actions, no
-cache restoration, no inherited secrets. It validates the candidate receipt
-with embedded dependency-free code, verifies the candidate digest, and invokes
-`npm stage publish` as an argument array built only from validated values.
+cache restoration, no inherited secrets. It downloads the sealed artifact by
+ID, validates every receipt context field with embedded dependency-free code,
+verifies the candidate digest, and invokes `npm stage publish` from validated
+values.
 
-The same split covers GitHub Release authority. `verify` runs the public
-smoke — package code again — and cannot write. `release` can write and runs
-no package code, has no checkout, no dependency installation, and no
-arbitrary release command.
+The same split covers GitHub Release authority. `verify_core` seals the bundle
+on a clean runner before package code. `public_smoke` runs package code but
+exports no artifact or metadata. `release` waits for both, downloads only the
+clean bundle's artifact ID, independently rebinds it to GitHub context, and
+runs no package code.
 
 Invariants 2, 3, and 8.
 
@@ -51,14 +59,16 @@ Invariants 1 and 5.
 The classic gap: what was tested is not what was shipped. sallyport closes it by
 never producing a second tarball.
 
-The candidate is packed exactly once, by sallyport, with `--ignore-scripts`. Its
-SHA-256, SHA-512, SRI integrity, and byte length are recorded immediately, and
-the packed manifest is revalidated from inside the archive. `release:smoke`
-receives a **copy**; the authoritative `package.tgz` is never handed to package
-code after its digest is recorded, and the copy is hashed afterward to prove it
-was not modified. The staging job verifies the digest again before publishing,
-and finalization requires the tarball downloaded from the public registry to be
-byte-for-byte equal to the candidate.
+The candidate is packed exactly once with `--ignore-scripts`. After all package
+code has stopped, `seal` downloads that output on a fresh runner, validates its
+packed manifest, and records SHA-256, SHA-512, SRI integrity, and byte length.
+The staging job downloads the sealed artifact by ID and recomputes the digests
+before publishing. Finalization requires the public registry tarball to be
+byte-for-byte equal, then seals it into the release bundle before the separate
+consumer smoke runs.
+
+This binds metadata, context, and immutable bytes. It does not prove that the
+JavaScript intentionally emitted by a reviewed package is benign.
 
 Invariant 4.
 
@@ -108,15 +118,18 @@ Invariant 10.
 Release assets are the artifact people download when they distrust the
 registry, so they need their own integrity story.
 
-The release job downloads only the already verified bundle, rechecks its
-manifest and hashes, and publishes draft-first: create the draft, add the
-committed release notes, attach the assets, then publish. Immutable Releases
+The release job downloads only the clean verifier's immutable bundle ID, then
+independently resolves and downloads the originating sealed-candidate artifact
+by ID. It requires byte equality, rechecks the manifest and hashes, rebinds the
+candidate run and tag target, and publishes draft-first: create the draft, add
+the committed release notes, attach every asset including the notes, then
+publish. Immutable Releases
 fix assets and the tag at publication, which is why the assets must all be
 attached before the draft is published.
 
-Replay never overwrites. A rerun against a matching published release is a
-successful no-op; a release for the same tag with a different receipt or
-different assets is a hard failure that writes nothing. See
+Replay never overwrites. A rerun compares title, body, assets, and digests. A
+matching published release is a successful no-op; any difference is a hard
+failure that writes nothing. See
 [recovery](./recovery.md#hard-failures).
 
 Invariants 3, 4, and 10.

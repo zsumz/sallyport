@@ -21,10 +21,13 @@ on:
 permissions: {}
 
 jobs:
-  verify:
-    name: Verify public package
+  verify_core:
+    name: Verify and seal public package
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      bundle_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      candidate_commit: ${{ steps.candidate.outputs.commit }}
     permissions:
       actions: read
       contents: read
@@ -91,22 +94,25 @@ jobs:
             --sallyport-sha "$SALLYPORT_WORKFLOW_SHA" \
             --output "$RUNNER_TEMP/sallyport-candidate"
 
-      - name: Check out consumer tag
+      - name: Check out exact consumer commit
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: ${{ github.repository }}
-          ref: ${{ steps.candidate.outputs.tag }}
+          ref: ${{ steps.candidate.outputs.commit }}
           path: consumer
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Fetch default branch
+      - name: Bind tag and default branch
         working-directory: consumer
         env:
+          SALLYPORT_TAG: ${{ steps.candidate.outputs.tag }}
           SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          git fetch --force origin \
+            "refs/tags/$SALLYPORT_TAG:refs/tags/$SALLYPORT_TAG"
           git fetch --no-tags origin \
-            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/remotes/origin/$SALLYPORT_DEFAULT_BRANCH"
+            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/sallyport/default-branch"
 
       - name: Import release signing key
         if: inputs.profile == 'strict'
@@ -122,7 +128,7 @@ jobs:
           GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
           SALLYPORT_PROFILE: ${{ inputs.profile }}
           SALLYPORT_TAG: ${{ steps.candidate.outputs.tag }}
-          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_COMMIT: ${{ steps.candidate.outputs.commit }}
           SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
         run: |
           args=(
@@ -132,7 +138,8 @@ jobs:
             --tag "$SALLYPORT_TAG"
             --repository "$GITHUB_REPOSITORY"
             --repository-id "$GITHUB_REPOSITORY_ID"
-            --default-branch "$SALLYPORT_DEFAULT_BRANCH"
+            --default-branch-ref refs/sallyport/default-branch
+            --expected-commit "$SALLYPORT_COMMIT"
             # The version is already public here; only stage requires
             # registry absence.
             --mode finalize
@@ -142,11 +149,7 @@ jobs:
           fi
           node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
 
-      - name: Install consumer dependencies
-        working-directory: consumer
-        run: npm ci
-
-      - name: Verify public package
+      - name: Verify public package without consumer code
         env:
           SALLYPORT_PROFILE: ${{ inputs.profile }}
           SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
@@ -155,8 +158,10 @@ jobs:
             internal verify-public
             --consumer "$GITHUB_WORKSPACE/consumer"
             --candidate-dir "$RUNNER_TEMP/sallyport-candidate"
+            --notes "$GITHUB_WORKSPACE/consumer/docs/releases/v${{ steps.candidate.outputs.package_version }}.md"
             --output "$RUNNER_TEMP/sallyport-public"
             --profile "$SALLYPORT_PROFILE"
+            --skip-smoke
           )
           if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
             args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
@@ -174,6 +179,7 @@ jobs:
             --output "$RUNNER_TEMP/sallyport-bundle"
 
       - name: Upload release bundle
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sallyport-release-${{ inputs.candidate_run_id }}
@@ -181,14 +187,92 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  # Package code runs here, after the authoritative bundle is sealed. This job
+  # exports nothing consumed by the release job.
+  public_smoke:
+    name: Smoke public package
+    needs: verify_core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Download sealed bundle by ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.verify_core.outputs.bundle_artifact_id }}
+          path: ${{ runner.temp }}/bundle
+
+      - name: Check out exact consumer commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ needs.verify_core.outputs.candidate_commit }}
+          path: consumer
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Install consumer dependencies
+        working-directory: consumer
+        run: npm ci
+
+      - name: Smoke sealed public bytes
+        env:
+          SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
+          SALLYPORT_CONSUMER_DIR: ${{ github.workspace }}/consumer
+          SALLYPORT_SMOKE_TARBALL: ${{ runner.temp }}/smoke-package.tgz
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { execFileSync } from 'node:child_process';
+          import { copyFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
+          const receipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
+          const tarball = process.env.SALLYPORT_SMOKE_TARBALL ?? '';
+          copyFileSync(join(directory, 'package.tgz'), tarball);
+          execFileSync('npm', ['run', 'release:smoke'], {
+              cwd: process.env.SALLYPORT_CONSUMER_DIR,
+              env: {
+                  ...process.env,
+                  SALLYPORT_TARBALL: tarball,
+                  SALLYPORT_PACKAGE: receipt.package.name,
+                  SALLYPORT_VERSION: receipt.package.version,
+                  SALLYPORT_DIST_TAG: receipt.package.distTag,
+              },
+              stdio: 'inherit',
+          });
+          SALLYPORT_NODE
+
   # Only this job can write repository contents; it runs no consumer code.
   release:
     name: Publish GitHub release
-    needs: verify
+    needs: [verify_core, public_smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: github-release
     permissions:
+      actions: read
       contents: write
 
     steps:
@@ -214,28 +298,106 @@ jobs:
       - name: Download release bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: sallyport-release-${{ inputs.candidate_run_id }}
+          artifact-ids: ${{ needs.verify_core.outputs.bundle_artifact_id }}
           path: ${{ runner.temp }}/bundle
+
+      - name: Resolve originating candidate artifact
+        id: origin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
+          SALLYPORT_CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SALLYPORT_REPOSITORY: ${{ github.repository }}
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const fail = (message) => {
+              process.stdout.write(`::error::${message}\n`);
+              process.exit(1);
+          };
+          let receipt;
+          try {
+              receipt = JSON.parse(readFileSync(join(
+                  process.env.SALLYPORT_BUNDLE_DIR ?? '',
+                  'candidate.json',
+              ), 'utf8'));
+          } catch (error) {
+              fail(`Candidate receipt is unreadable: ${error.message}`);
+          }
+          const commit = receipt?.source?.commit;
+          const attempt = receipt?.run?.attempt;
+          if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) {
+              fail('Candidate receipt carries no valid source commit.');
+          }
+          if (!Number.isSafeInteger(attempt) || attempt < 1) {
+              fail('Candidate receipt carries no valid run attempt.');
+          }
+          if (String(receipt?.run?.id) !== process.env.SALLYPORT_CANDIDATE_RUN_ID) {
+              fail('Candidate receipt run ID does not match candidate_run_id.');
+          }
+          const result = execFileSync('gh', [
+              'api',
+              '-H', 'Accept: application/vnd.github+json',
+              `repos/${process.env.SALLYPORT_REPOSITORY}/actions/runs/${process.env.SALLYPORT_CANDIDATE_RUN_ID}/artifacts?per_page=100`,
+          ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          const listed = JSON.parse(result);
+          const name = `sallyport-candidate-${commit}-${String(attempt)}`;
+          const matches = Array.isArray(listed.artifacts)
+              ? listed.artifacts.filter((artifact) => artifact?.name === name)
+              : [];
+          if (matches.length !== 1) {
+              fail(`Expected exactly one originating artifact ${name}; found ${String(matches.length)}.`);
+          }
+          const artifact = matches[0];
+          if (!Number.isSafeInteger(artifact.id) || artifact.id < 1 || artifact.expired === true) {
+              fail(`Originating artifact ${name} is invalid or expired.`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', `artifact_id=${String(artifact.id)}\n`);
+          SALLYPORT_NODE
+
+      - name: Download originating candidate by ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.origin.outputs.artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          path: ${{ runner.temp }}/origin
 
       - name: Validate release bundle
         id: bundle
         env:
+          GH_TOKEN: ${{ github.token }}
           SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
+          SALLYPORT_ORIGIN_DIR: ${{ runner.temp }}/origin
+          SALLYPORT_CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SALLYPORT_REPOSITORY: ${{ github.repository }}
+          SALLYPORT_REPOSITORY_ID: ${{ github.repository_id }}
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
+          import { execFileSync } from 'node:child_process';
           import { createHash } from 'node:crypto';
-          import { appendFileSync, readFileSync } from 'node:fs';
+          import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
           import { join } from 'node:path';
 
           const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
-          const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+          const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
           const DIST_TAG = /^[a-z][a-z0-9-]*$/;
           const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
           const COMMIT = /^[0-9a-f]{40}$/;
           const SHA256 = /^[0-9a-f]{64}$/;
           const SHA512 = /^[0-9a-f]{128}$/;
+          const INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/;
           const SUM_LINE = /^([0-9a-f]{64}) [ *](.+)$/;
-          const REQUIRED_SUMS = ['package.tgz', 'candidate.json', 'release.json'];
+          const FINGERPRINT = /^[0-9A-F]{40}$/;
+          const REQUIRED_SUMS = ['package.tgz', 'candidate.json', 'release.json', 'RELEASE_NOTES.md'];
 
           const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
           const problems = [];
@@ -258,6 +420,25 @@ jobs:
               }
           };
           const digest = (name) => createHash('sha256').update(read(name)).digest('hex');
+          const originDirectory = process.env.SALLYPORT_ORIGIN_DIR ?? '';
+          const readOrigin = (name) => {
+              try {
+                  return readFileSync(join(originDirectory, name));
+              } catch (error) {
+                  fail(`Originating candidate file ${name} is unreadable: ${error.message}`);
+              }
+          };
+          const ghJson = (path) => {
+              try {
+                  return JSON.parse(execFileSync('gh', [
+                      'api',
+                      '-H', 'Accept: application/vnd.github+json',
+                      path,
+                  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+              } catch (error) {
+                  fail(`GitHub context lookup failed for ${path}: ${error.stderr ?? error.message}`);
+              }
+          };
 
           let release;
           let receipt;
@@ -276,10 +457,28 @@ jobs:
           const source = section(release.source);
           const receiptPackage = section(receipt.package);
           const receiptSource = section(receipt.source);
+          const receiptRepository = section(receipt.repository);
+          const receiptSallyport = section(receipt.sallyport);
+          const receiptRun = section(receipt.run);
+          const receiptTarball = section(receipt.tarball);
+
+          let originNames = [];
+          try {
+              originNames = readdirSync(originDirectory).sort();
+          } catch (error) {
+              fail(`Originating candidate directory is unreadable: ${error.message}`);
+          }
+          check(
+              JSON.stringify(originNames) === JSON.stringify(['candidate.json', 'package.tgz']),
+              'originating candidate artifact must contain exactly candidate.json and package.tgz',
+          );
+          check(read('candidate.json').equals(readOrigin('candidate.json')), 'bundled candidate.json must equal the originating sealed receipt');
+          check(read('package.tgz').equals(readOrigin('package.tgz')), 'bundled package.tgz must equal the originating sealed tarball');
 
           check(release.schema === 1, 'release.json schema must be 1');
           check(release.protocol === 'sallyport/0.1', 'release.json protocol must be sallyport/0.1');
           check(typeof release.candidateReceiptSha256 === 'string' && SHA256.test(release.candidateReceiptSha256), 'release.json candidateReceiptSha256 must be 64 hex characters');
+          check(typeof release.releaseNotesSha256 === 'string' && SHA256.test(release.releaseNotesSha256), 'release.json releaseNotesSha256 must be 64 hex characters');
           check(typeof releasePackage.name === 'string' && PACKAGE_NAME.test(releasePackage.name), 'release.json package.name must be a valid npm package name');
           check(typeof releasePackage.version === 'string' && SEMVER.test(releasePackage.version), 'release.json package.version must be a valid semantic version');
           check(typeof releasePackage.distTag === 'string' && DIST_TAG.test(releasePackage.distTag), 'release.json package.distTag must be a valid dist-tag');
@@ -293,21 +492,86 @@ jobs:
           check(typeof source.repository === 'string' && REPOSITORY.test(source.repository), 'release.json source.repository must be owner/name');
           check(typeof source.commit === 'string' && COMMIT.test(source.commit), 'release.json source.commit must be a 40-character commit');
           check(source.tag === `v${releasePackage.version}`, 'release.json source.tag must be v<package.version>');
-          check(source.repository === process.env.GITHUB_REPOSITORY, 'release.json source.repository must match the current repository');
+          check(source.repository === process.env.SALLYPORT_REPOSITORY, 'release.json source.repository must match the current repository');
+          check(receipt.schema === 1, 'candidate.json schema must be 1');
+          check(receipt.protocol === 'sallyport/0.1', 'candidate.json protocol must be sallyport/0.1');
+          check(typeof receiptSallyport.version === 'string' && SEMVER.test(receiptSallyport.version), 'candidate.json sallyport.version must be semantic');
+          check(typeof receiptSallyport.sha === 'string' && COMMIT.test(receiptSallyport.sha), 'candidate.json sallyport.sha must be a 40-character commit');
+          check(typeof receiptRepository.name === 'string' && REPOSITORY.test(receiptRepository.name), 'candidate.json repository.name must be owner/name');
+          check(Number.isSafeInteger(receiptRepository.id) && receiptRepository.id > 0, 'candidate.json repository.id must be positive');
+          check(typeof receiptRepository.defaultBranch === 'string' && receiptRepository.defaultBranch.length > 0, 'candidate.json repository.defaultBranch must be nonempty');
+          check(typeof receiptSource.tag === 'string' && receiptSource.tag.length > 0, 'candidate.json source.tag must be nonempty');
+          check(typeof receiptSource.commit === 'string' && COMMIT.test(receiptSource.commit), 'candidate.json source.commit must be a 40-character commit');
+          check(typeof receiptSource.signed === 'boolean', 'candidate.json source.signed must be boolean');
+          check(typeof receiptPackage.name === 'string' && PACKAGE_NAME.test(receiptPackage.name), 'candidate.json package.name must be valid');
+          check(typeof receiptPackage.version === 'string' && SEMVER.test(receiptPackage.version), 'candidate.json package.version must be semantic');
+          check(receiptPackage.access === 'public', 'candidate.json package.access must be public');
+          check(typeof receiptPackage.distTag === 'string' && DIST_TAG.test(receiptPackage.distTag), 'candidate.json package.distTag must be valid');
+          check(receiptTarball.filename === 'package.tgz', 'candidate.json tarball.filename must be package.tgz');
+          check(Number.isSafeInteger(receiptTarball.bytes) && receiptTarball.bytes > 0, 'candidate.json tarball.bytes must be positive');
+          check(typeof receiptTarball.sha256 === 'string' && SHA256.test(receiptTarball.sha256), 'candidate.json tarball.sha256 must be 64 hex characters');
+          check(typeof receiptTarball.sha512 === 'string' && SHA512.test(receiptTarball.sha512), 'candidate.json tarball.sha512 must be 128 hex characters');
+          check(typeof receiptTarball.integrity === 'string' && INTEGRITY.test(receiptTarball.integrity), 'candidate.json tarball.integrity must be sha512 SRI');
+          check(Number.isSafeInteger(receiptRun.id) && receiptRun.id > 0, 'candidate.json run.id must be positive');
+          check(Number.isSafeInteger(receiptRun.attempt) && receiptRun.attempt > 0, 'candidate.json run.attempt must be positive');
           check(receiptPackage.name === releasePackage.name, 'candidate.json package.name must match release.json');
           check(receiptPackage.version === releasePackage.version, 'candidate.json package.version must match release.json');
           check(receiptPackage.distTag === releasePackage.distTag, 'candidate.json package.distTag must match release.json');
           check(receiptSource.tag === source.tag, 'candidate.json source.tag must match release.json');
           check(receiptSource.commit === source.commit, 'candidate.json source.commit must match release.json');
+          check(receiptSource.tag === `v${receiptPackage.version}`, 'candidate.json source.tag must be v<package.version>');
+          const versionMatch = typeof releasePackage.version === 'string'
+              ? SEMVER.exec(releasePackage.version)
+              : null;
+          const prerelease = versionMatch?.[1];
+          const expectedDistTag = prerelease === undefined ? 'latest' : prerelease.split('.')[0];
+          check(releasePackage.distTag === expectedDistTag, 'release.json package.distTag must be derived from package.version');
+          check(receiptRepository.name === process.env.SALLYPORT_REPOSITORY, 'candidate.json repository.name must match the current repository');
+          check(String(receiptRepository.id) === process.env.SALLYPORT_REPOSITORY_ID, 'candidate.json repository.id must match the current repository ID');
+          check(receiptRepository.defaultBranch === process.env.SALLYPORT_DEFAULT_BRANCH, 'candidate.json repository.defaultBranch must match the current default branch');
+          check(receiptSallyport.workflow === 'zsumz/sallyport/.github/workflows/stage.yml', 'candidate.json must name the stage workflow');
+          check(receiptSallyport.sha === process.env.SALLYPORT_WORKFLOW_SHA, 'candidate.json sallyport.sha must match the executing finalizer');
+          check(String(receiptRun.id) === process.env.SALLYPORT_CANDIDATE_RUN_ID, 'candidate.json run.id must match candidate_run_id');
+
+          const expectedFingerprint = (process.env.SALLYPORT_SIGNER_FINGERPRINT ?? '')
+              .replace(/[\s:]/g, '')
+              .replace(/^0x/i, '')
+              .toUpperCase();
+          if (process.env.SALLYPORT_PROFILE === 'strict') {
+              check(receiptSource.signed === true, 'strict profile requires candidate.json source.signed true');
+              check(FINGERPRINT.test(expectedFingerprint), 'strict profile requires a valid expected signer fingerprint');
+              check(receiptSource.signerFingerprint === expectedFingerprint, 'candidate.json signer must match the expected signer');
+          } else {
+              check(receiptSource.signed === false, 'standard profile requires candidate.json source.signed false');
+              check(receiptSource.signerFingerprint === null, 'standard profile requires no candidate signer fingerprint');
+          }
+
+          const candidateRun = ghJson(`repos/${process.env.SALLYPORT_REPOSITORY}/actions/runs/${process.env.SALLYPORT_CANDIDATE_RUN_ID}`);
+          const runRepository = section(candidateRun.repository);
+          check(String(candidateRun.id) === process.env.SALLYPORT_CANDIDATE_RUN_ID, 'candidate workflow run ID must match candidate_run_id');
+          check(String(candidateRun.run_attempt) === String(receiptRun.attempt), 'candidate workflow attempt must match candidate.json');
+          check(String(runRepository.id) === process.env.SALLYPORT_REPOSITORY_ID, 'candidate workflow repository ID must match the current repository');
+          check(runRepository.full_name === process.env.SALLYPORT_REPOSITORY, 'candidate workflow repository name must match the current repository');
+          check(candidateRun.path === '.github/workflows/sallyport.yml', 'candidate workflow path must be .github/workflows/sallyport.yml');
+          check(candidateRun.event === 'push', 'candidate workflow must be a tag push');
+          check(candidateRun.conclusion === 'success', 'candidate workflow must have succeeded');
+          check(candidateRun.head_branch === receiptSource.tag, 'candidate workflow tag must match candidate.json');
+          check(candidateRun.head_sha === receiptSource.commit, 'candidate workflow commit must match candidate.json');
 
           const tarballSha256 = digest('package.tgz');
           const tarballSha512 = createHash('sha512').update(read('package.tgz')).digest('hex');
+          const tarballIntegrity = `sha512-${createHash('sha512').update(read('package.tgz')).digest('base64')}`;
           check(tarballSha256 === releaseCandidate.sha256, 'bundled tarball does not match release.json candidate.sha256');
           check(tarballSha512 === releaseCandidate.sha512, 'bundled tarball does not match release.json candidate.sha512');
           check(tarballSha256 === registry.sha256, 'bundled tarball does not match the verified public SHA-256');
           check(tarballSha512 === registry.sha512, 'bundled tarball does not match the verified public SHA-512');
+          check(read('package.tgz').byteLength === receiptTarball.bytes, 'bundled tarball byte length does not match candidate.json');
+          check(tarballSha256 === receiptTarball.sha256, 'bundled tarball SHA-256 does not match candidate.json');
+          check(tarballSha512 === receiptTarball.sha512, 'bundled tarball SHA-512 does not match candidate.json');
+          check(tarballIntegrity === receiptTarball.integrity, 'bundled tarball integrity does not match candidate.json');
           check(digest('candidate.json') === release.candidateReceiptSha256, 'bundled candidate.json does not match release.json candidateReceiptSha256');
           check(read('RELEASE_NOTES.md').byteLength > 0, 'RELEASE_NOTES.md must not be empty');
+          check(digest('RELEASE_NOTES.md') === release.releaseNotesSha256, 'bundled RELEASE_NOTES.md does not match release.json releaseNotesSha256');
 
           const listed = new Set();
           for (const line of read('SHA256SUMS').toString('utf8').split('\n')) {
@@ -340,6 +604,7 @@ jobs:
 
           const outputs = {
               tag: source.tag,
+              commit: source.commit,
               title: `${releasePackage.name} v${releasePackage.version}`,
               package_name: releasePackage.name,
               package_version: releasePackage.version,
@@ -355,6 +620,7 @@ jobs:
           SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
           SALLYPORT_REPOSITORY: ${{ github.repository }}
           SALLYPORT_TAG: ${{ steps.bundle.outputs.tag }}
+          SALLYPORT_COMMIT: ${{ steps.bundle.outputs.commit }}
           SALLYPORT_TITLE: ${{ steps.bundle.outputs.title }}
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
@@ -366,13 +632,15 @@ jobs:
           const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
           const TAG = /^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
           const ASSET_DIGEST = /^sha256:([0-9a-f]{64})$/;
-          const ASSETS = ['package.tgz', 'candidate.json', 'release.json', 'SHA256SUMS'];
+          const ASSETS = ['package.tgz', 'candidate.json', 'release.json', 'RELEASE_NOTES.md', 'SHA256SUMS'];
           const NOT_FOUND = /HTTP 404|Not Found/;
 
           const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
           const repository = process.env.SALLYPORT_REPOSITORY ?? '';
           const tag = process.env.SALLYPORT_TAG ?? '';
+          const commit = process.env.SALLYPORT_COMMIT ?? '';
           const title = process.env.SALLYPORT_TITLE ?? '';
+          const notes = readFileSync(join(directory, 'RELEASE_NOTES.md'), 'utf8');
 
           const fail = (message) => {
               process.stdout.write(`::error::${message}\n`);
@@ -399,12 +667,40 @@ jobs:
           if (!TAG.test(tag)) {
               fail('The release tag is malformed.');
           }
+          if (!/^[0-9a-f]{40}$/.test(commit)) {
+              fail('The release commit is malformed.');
+          }
 
           const digests = new Map(ASSETS.map((name) => [
               name,
               createHash('sha256').update(readFileSync(join(directory, name))).digest('hex'),
           ]));
 
+          const assertTagTarget = () => {
+              const refResult = gh([
+                  'api', '-H', 'Accept: application/vnd.github+json',
+                  `repos/${repository}/git/ref/tags/${tag}`,
+              ]);
+              if (!refResult.ok) {
+                  fail(`Unable to resolve release tag ${tag}: ${refResult.stderr.trim()}`);
+              }
+              let object = JSON.parse(refResult.stdout).object;
+              for (let depth = 0; object?.type === 'tag' && depth < 8; depth += 1) {
+                  const tagResult = gh([
+                      'api', '-H', 'Accept: application/vnd.github+json',
+                      `repos/${repository}/git/tags/${object.sha}`,
+                  ]);
+                  if (!tagResult.ok) {
+                      fail(`Unable to peel release tag ${tag}: ${tagResult.stderr.trim()}`);
+                  }
+                  object = JSON.parse(tagResult.stdout).object;
+              }
+              if (object?.type !== 'commit' || object.sha !== commit) {
+                  fail(`Release tag ${tag} does not resolve to verified commit ${commit}.`);
+              }
+          };
+
+          assertTagTarget();
           const lookup = gh(['api', '-H', 'Accept: application/vnd.github+json', `repos/${repository}/releases/tags/${tag}`]);
           let existing = null;
           if (lookup.ok) {
@@ -413,10 +709,17 @@ jobs:
               fail(`Unable to query the existing GitHub release: ${lookup.stderr.trim()}`);
           }
 
-          const compare = (assets) => {
+          const compare = (release) => {
               const conflicts = [];
               const missing = [];
               const present = new Set();
+              if (release.name !== title) {
+                  conflicts.push('release title differs from the verified bundle');
+              }
+              if (release.body !== notes) {
+                  conflicts.push('release notes differ from the verified bundle');
+              }
+              const assets = Array.isArray(release.assets) ? release.assets : [];
               for (const asset of assets) {
                   const name = typeof asset.name === 'string' ? asset.name : '';
                   present.add(name);
@@ -444,14 +747,16 @@ jobs:
               if (names.length === 0) {
                   return;
               }
+              assertTagTarget();
               const paths = names.map((name) => join(directory, name));
-              const result = gh(['release', 'upload', tag, ...paths, '--repo', repository, '--clobber']);
+              const result = gh(['release', 'upload', tag, ...paths, '--repo', repository]);
               if (!result.ok) {
                   fail(`Unable to upload release assets: ${result.stderr.trim()}`);
               }
           };
 
           const publish = () => {
+              assertTagTarget();
               const result = gh(['release', 'edit', tag, '--repo', repository, '--draft=false']);
               if (!result.ok) {
                   fail(`Unable to publish the GitHub release: ${result.stderr.trim()}`);
@@ -459,6 +764,7 @@ jobs:
           };
 
           if (existing === null) {
+              assertTagTarget();
               const created = gh([
                   'release', 'create', tag,
                   '--repo', repository,
@@ -474,8 +780,7 @@ jobs:
               publish();
               note(`Published GitHub release ${tag}.`);
           } else {
-              const assets = Array.isArray(existing.assets) ? existing.assets : [];
-              const { conflicts, missing } = compare(assets);
+              const { conflicts, missing } = compare(existing);
               if (existing.draft === true) {
                   if (conflicts.length > 0) {
                       for (const conflict of conflicts) {

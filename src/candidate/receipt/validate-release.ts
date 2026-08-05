@@ -12,7 +12,16 @@ import {
 } from './checks.ts';
 import { PROTOCOL, RECEIPT_SCHEMA_VERSION } from './model.ts';
 
-const ROOT_KEYS = ['schema', 'protocol', 'candidateReceiptSha256', 'package', 'candidate', 'registry', 'source'];
+const ROOT_KEYS = [
+    'schema',
+    'protocol',
+    'candidateReceiptSha256',
+    'releaseNotesSha256',
+    'package',
+    'candidate',
+    'registry',
+    'source',
+];
 const PACKAGE_KEYS = ['name', 'version', 'distTag'];
 const CANDIDATE_KEYS = ['sha256', 'sha512'];
 const REGISTRY_KEYS = ['sha256', 'sha512', 'integrityVerified', 'signatureVerified', 'provenanceVerified'];
@@ -28,6 +37,7 @@ export function validateReleaseRecord(value: unknown): string[] {
     checkLiteral(record, '', 'schema', RECEIPT_SCHEMA_VERSION, failures);
     checkLiteral(record, '', 'protocol', PROTOCOL, failures);
     checkPattern(record, '', 'candidateReceiptSha256', patterns.sha256, descriptions.sha256, failures);
+    checkPattern(record, '', 'releaseNotesSha256', patterns.sha256, descriptions.sha256, failures);
     const version = checkPackage(record, failures);
     const candidate = checkCandidate(record, failures);
     checkRegistry(record, candidate, failures);

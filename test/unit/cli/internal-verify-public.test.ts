@@ -161,9 +161,16 @@ function attestations(payload: Record<string, unknown> = statement()): Record<st
 }
 
 async function verify(overrides: Partial<Record<string, string>> = {}): Promise<void> {
+    const notes = path.join(
+        candidate.consumer.dir,
+        'docs',
+        'releases',
+        `v${candidate.consumer.version}.md`,
+    );
     const values: Record<string, string> = {
         '--consumer': candidate.consumer.dir,
         '--candidate-dir': candidate.dir,
+        '--notes': notes,
         '--output': outputDir,
         '--profile': 'standard',
         ...overrides,
@@ -182,6 +189,7 @@ describe('internal verify-public', () => {
         expect(validateReleaseRecord(record)).toEqual([]);
         expect(record).toMatchObject({
             candidateReceiptSha256: expect.any(String) as unknown,
+            releaseNotesSha256: expect.any(String) as unknown,
             package: {
                 name: candidate.consumer.name,
                 version: candidate.consumer.version,
@@ -317,6 +325,12 @@ describe('internal verify-public', () => {
         await verifyPublicCommand([
             '--consumer', candidate.consumer.dir,
             '--candidate-dir', candidate.dir,
+            '--notes', path.join(
+                candidate.consumer.dir,
+                'docs',
+                'releases',
+                `v${candidate.consumer.version}.md`,
+            ),
             '--output', outputDir,
         ], harness.effects);
 

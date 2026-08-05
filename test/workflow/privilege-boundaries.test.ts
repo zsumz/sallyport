@@ -47,6 +47,13 @@ const JOB_BOUNDARIES: readonly JobBoundary[] = [
     },
     {
         workflow: 'stage.yml',
+        job: 'seal',
+        permissions: { actions: 'read', contents: 'read' },
+        environment: undefined,
+        runsConsumerCode: true,
+    },
+    {
+        workflow: 'stage.yml',
         job: 'stage',
         permissions: { 'id-token': 'write' },
         environment: 'npm-stage',
@@ -54,7 +61,14 @@ const JOB_BOUNDARIES: readonly JobBoundary[] = [
     },
     {
         workflow: 'finalize.yml',
-        job: 'verify',
+        job: 'verify_core',
+        permissions: { actions: 'read', contents: 'read' },
+        environment: undefined,
+        runsConsumerCode: true,
+    },
+    {
+        workflow: 'finalize.yml',
+        job: 'public_smoke',
         permissions: { actions: 'read', contents: 'read' },
         environment: undefined,
         runsConsumerCode: true,
@@ -62,7 +76,7 @@ const JOB_BOUNDARIES: readonly JobBoundary[] = [
     {
         workflow: 'finalize.yml',
         job: 'release',
-        permissions: { contents: 'write' },
+        permissions: { actions: 'read', contents: 'write' },
         environment: 'github-release',
         runsConsumerCode: false,
     },
@@ -164,7 +178,7 @@ describe('reusable workflow privilege boundaries', () => {
 
     it('finalize.yml:release holds no OIDC or npm authority', () => {
         const permissions = jobOf('finalize.yml', 'release').permissions ?? {};
-        expect(Object.keys(permissions)).toEqual(['contents']);
+        expect(Object.keys(permissions)).toEqual(['actions', 'contents']);
         expect(permissions['id-token']).toBeUndefined();
         expect(runScriptsOf(jobOf('finalize.yml', 'release'))).not.toMatch(/\bnpm\s+stage\b/);
     });
@@ -188,7 +202,11 @@ describe('reusable workflow privilege boundaries', () => {
     });
 
     it('only unprivileged jobs check out sallyport implementation code', () => {
-        for (const [file, job] of [['stage.yml', 'prepare'], ['finalize.yml', 'verify']] as const) {
+        for (const [file, job] of [
+            ['stage.yml', 'prepare'],
+            ['stage.yml', 'seal'],
+            ['finalize.yml', 'verify_core'],
+        ] as const) {
             const sallyportCheckout = stepsOf(jobOf(file, job)).find(
                 (step) => step.with?.repository === 'zsumz/sallyport',
             );
@@ -206,7 +224,12 @@ describe('reusable workflow privilege boundaries', () => {
     });
 
     it('consumer checkouts never persist credentials', () => {
-        for (const [file, job] of [['stage.yml', 'prepare'], ['finalize.yml', 'verify']] as const) {
+        for (const [file, job] of [
+            ['stage.yml', 'prepare'],
+            ['stage.yml', 'seal'],
+            ['finalize.yml', 'verify_core'],
+            ['finalize.yml', 'public_smoke'],
+        ] as const) {
             for (const step of stepsOf(jobOf(file, job))) {
                 if (!(step.uses ?? '').includes('actions/checkout')) {
                     continue;
@@ -214,5 +237,26 @@ describe('reusable workflow privilege boundaries', () => {
                 expect(step.with?.['persist-credentials']).toBe(false);
             }
         }
+    });
+
+    it('fresh sealing jobs execute no consumer dependency or package code', () => {
+        for (const [file, job] of [
+            ['stage.yml', 'seal'],
+            ['finalize.yml', 'verify_core'],
+        ] as const) {
+            const scripts = runScriptsOf(jobOf(file, job));
+            expect(scripts).not.toMatch(/\bnpm\s+ci\b/);
+            expect(scripts).not.toMatch(/\bnpm\s+run\b/);
+            expect(scripts).not.toContain('internal smoke');
+            expect(scripts).not.toContain('release:smoke');
+        }
+    });
+
+    it('consumer smoke exports no artifact or job output trusted by release', () => {
+        const smoke = jobOf('finalize.yml', 'public_smoke');
+        expect(smoke.needs).toBe('verify_core');
+        expect(usesOf(smoke).some((uses) => uses.includes('actions/upload-artifact'))).toBe(false);
+        expect(JSON.stringify(smoke)).not.toContain('GITHUB_OUTPUT');
+        expect(jobOf('finalize.yml', 'release').needs).toEqual(['verify_core', 'public_smoke']);
     });
 });

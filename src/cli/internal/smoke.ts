@@ -37,8 +37,7 @@ export function smokeDirectory(effects: CliEffects, name: string): string {
     return path.join(base, name);
 }
 
-// Package code only ever sees a copy; the authoritative digest is recorded
-// before the copy is handed over and rechecked afterwards.
+// Package code sees a copy, which is hashed before and after the smoke command.
 export async function runReleaseSmoke(request: SmokeRequest): Promise<SmokeOutcome> {
     const { effects } = request;
     const before = hashTarball(request.tarball);

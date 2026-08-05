@@ -21,6 +21,8 @@ jobs:
     name: Prepare release candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      tarball_artifact_id: ${{ steps.upload.outputs.artifact-id }}
     permissions:
       contents: read
 
@@ -55,7 +57,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
           path: consumer
           fetch-depth: 0
           persist-credentials: false
@@ -88,13 +90,16 @@ jobs:
             exit 1
           fi
 
-      - name: Fetch default branch
+      - name: Bind tag and default branch
         working-directory: consumer
         env:
+          SALLYPORT_TAG: ${{ github.ref_name }}
           SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          git fetch --force origin \
+            "refs/tags/$SALLYPORT_TAG:refs/tags/$SALLYPORT_TAG"
           git fetch --no-tags origin \
-            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/remotes/origin/$SALLYPORT_DEFAULT_BRANCH"
+            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/sallyport/default-branch"
 
       - name: Import release signing key
         if: inputs.profile == 'strict'
@@ -111,7 +116,7 @@ jobs:
           GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
           SALLYPORT_PROFILE: ${{ inputs.profile }}
           SALLYPORT_TAG: ${{ github.ref_name }}
-          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_COMMIT: ${{ github.sha }}
           SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
         run: |
           args=(
@@ -121,7 +126,8 @@ jobs:
             --tag "$SALLYPORT_TAG"
             --repository "$GITHUB_REPOSITORY"
             --repository-id "$GITHUB_REPOSITORY_ID"
-            --default-branch "$SALLYPORT_DEFAULT_BRANCH"
+            --default-branch-ref refs/sallyport/default-branch
+            --expected-commit "$SALLYPORT_COMMIT"
           )
           if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
             args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
@@ -157,9 +163,116 @@ jobs:
             --version "$SALLYPORT_VERSION" \
             --dist-tag "$SALLYPORT_DIST_TAG"
 
-      - name: Create candidate receipt
+      - name: Upload unsealed tarball
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sallyport-unsealed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sallyport-out/package.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  # This fresh runner authors the receipt. It executes no package or dependency code.
+  seal:
+    name: Seal release candidate
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      candidate_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out exact consumer commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: consumer
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out sallyport
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zsumz/sallyport
+          ref: ${{ job.workflow_sha }}
+          path: sallyport
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Assert pinned toolchain
+        run: |
+          NODE_VERSION="$(node --version)"
+          NPM_VERSION="$(npm --version)"
+          if [ "$NODE_VERSION" != v24.19.0 ]; then
+            echo "::error::Expected Node v24.19.0; found $NODE_VERSION."
+            exit 1
+          fi
+          if [ "$NPM_VERSION" != 11.17.0 ]; then
+            echo "::error::Expected npm 11.17.0; found $NPM_VERSION."
+            exit 1
+          fi
+
+      - name: Download unsealed tarball by ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.tarball_artifact_id }}
+          path: ${{ runner.temp }}/sallyport-out
+
+      - name: Bind tag and default branch
+        working-directory: consumer
         env:
-          SALLYPORT_TARBALL: ${{ steps.pack.outputs.tarball }}
+          SALLYPORT_TAG: ${{ github.ref_name }}
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --force origin \
+            "refs/tags/$SALLYPORT_TAG:refs/tags/$SALLYPORT_TAG"
+          git fetch --no-tags origin \
+            "refs/heads/$SALLYPORT_DEFAULT_BRANCH:refs/sallyport/default-branch"
+
+      - name: Import release signing key
+        if: inputs.profile == 'strict'
+        working-directory: consumer
+        env:
+          GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
+        run: |
+          install -d -m 700 "$GNUPGHOME"
+          gpg --batch --import etc/release-signing-key.asc
+
+      - name: Reinspect source without package code
+        env:
+          GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_TAG: ${{ github.ref_name }}
+          SALLYPORT_COMMIT: ${{ github.sha }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
+        run: |
+          args=(
+            internal inspect-source
+            --consumer "$GITHUB_WORKSPACE/consumer"
+            --profile "$SALLYPORT_PROFILE"
+            --tag "$SALLYPORT_TAG"
+            --repository "$GITHUB_REPOSITORY"
+            --repository-id "$GITHUB_REPOSITORY_ID"
+            --default-branch-ref refs/sallyport/default-branch
+            --expected-commit "$SALLYPORT_COMMIT"
+          )
+          if [ -n "$SALLYPORT_SIGNER_FINGERPRINT" ]; then
+            args+=(--signer-fingerprint "$SALLYPORT_SIGNER_FINGERPRINT")
+          fi
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
+
+      - name: Create authoritative candidate receipt
+        env:
+          SALLYPORT_TARBALL: ${{ runner.temp }}/sallyport-out/package.tgz
           SALLYPORT_PROFILE: ${{ inputs.profile }}
           SALLYPORT_TAG: ${{ github.ref_name }}
           SALLYPORT_COMMIT: ${{ github.sha }}
@@ -197,10 +310,11 @@ jobs:
           )
           node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" "${args[@]}"
 
-      - name: Upload release candidate
+      - name: Upload sealed release candidate
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sallyport-candidate-${{ github.sha }}
+          name: sallyport-candidate-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/sallyport-out/package.tgz
             ${{ runner.temp }}/sallyport-out/candidate.json
@@ -210,7 +324,7 @@ jobs:
   # Keep repository code outside the job that can mint an npm credential.
   stage:
     name: Stage candidate on npm
-    needs: prepare
+    needs: seal
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: npm-stage
@@ -241,13 +355,23 @@ jobs:
       - name: Download release candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: sallyport-candidate-${{ github.sha }}
+          artifact-ids: ${{ needs.seal.outputs.candidate_artifact_id }}
           path: ${{ runner.temp }}/candidate
 
       - name: Validate candidate receipt
         id: candidate
         env:
           SALLYPORT_CANDIDATE_DIR: ${{ runner.temp }}/candidate
+          SALLYPORT_REPOSITORY: ${{ github.repository }}
+          SALLYPORT_REPOSITORY_ID: ${{ github.repository_id }}
+          SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SALLYPORT_TAG: ${{ github.ref_name }}
+          SALLYPORT_COMMIT: ${{ github.sha }}
+          SALLYPORT_RUN_ID: ${{ github.run_id }}
+          SALLYPORT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          SALLYPORT_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          SALLYPORT_PROFILE: ${{ inputs.profile }}
+          SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
           import { createHash } from 'node:crypto';
@@ -255,7 +379,7 @@ jobs:
           import { join } from 'node:path';
 
           const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
-          const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+          const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
           const DIST_TAG = /^[a-z][a-z0-9-]*$/;
           const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
           const COMMIT = /^[0-9a-f]{40}$/;
@@ -317,6 +441,33 @@ jobs:
           check(typeof tarball.integrity === 'string' && INTEGRITY.test(tarball.integrity), 'tarball.integrity must be a sha512- subresource integrity value');
           check(Number.isSafeInteger(run.id) && run.id > 0, 'run.id must be a positive integer');
           check(Number.isSafeInteger(run.attempt) && run.attempt > 0, 'run.attempt must be a positive integer');
+
+          const versionMatch = typeof candidatePackage.version === 'string'
+              ? SEMVER.exec(candidatePackage.version)
+              : null;
+          const prerelease = versionMatch?.[1];
+          const expectedDistTag = prerelease === undefined ? 'latest' : prerelease.split('.')[0];
+          const requestedFingerprint = (process.env.SALLYPORT_SIGNER_FINGERPRINT ?? '')
+              .replace(/[\s:]/g, '')
+              .replace(/^0x/i, '')
+              .toUpperCase();
+          check(repository.name === process.env.SALLYPORT_REPOSITORY, 'repository.name must match the current repository');
+          check(String(repository.id) === process.env.SALLYPORT_REPOSITORY_ID, 'repository.id must match the current repository ID');
+          check(repository.defaultBranch === process.env.SALLYPORT_DEFAULT_BRANCH, 'repository.defaultBranch must match the current default branch');
+          check(source.tag === process.env.SALLYPORT_TAG, 'source.tag must match the triggering tag');
+          check(source.commit === process.env.SALLYPORT_COMMIT, 'source.commit must match the triggering commit');
+          check(String(run.id) === process.env.SALLYPORT_RUN_ID, 'run.id must match the current workflow run');
+          check(String(run.attempt) === process.env.SALLYPORT_RUN_ATTEMPT, 'run.attempt must match the current workflow attempt');
+          check(sallyport.sha === process.env.SALLYPORT_WORKFLOW_SHA, 'sallyport.sha must match the executing workflow commit');
+          check(candidatePackage.distTag === expectedDistTag, 'package.distTag must be derived from package.version');
+          if (process.env.SALLYPORT_PROFILE === 'strict') {
+              check(source.signed === true, 'strict profile requires source.signed true');
+              check(FINGERPRINT.test(requestedFingerprint), 'strict profile requires a valid expected signer fingerprint');
+              check(source.signerFingerprint === requestedFingerprint, 'source.signerFingerprint must match the expected signer');
+          } else {
+              check(source.signed === false, 'standard profile requires source.signed false');
+              check(source.signerFingerprint === null, 'standard profile requires no signer fingerprint');
+          }
 
           const tarballPath = join(directory, 'package.tgz');
           let bytes;

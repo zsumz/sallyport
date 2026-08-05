@@ -64,9 +64,17 @@ const EXPECTED_INPUTS: ReadonlyArray<readonly [string, Readonly<Record<string, W
     ],
 ];
 
-const EXPECTED_JOB_GRAPH: ReadonlyArray<readonly [string, readonly string[], string, string]> = [
-    ['stage.yml', ['prepare', 'stage'], 'stage', 'prepare'],
-    ['finalize.yml', ['verify', 'release'], 'release', 'verify'],
+const EXPECTED_JOB_GRAPH: ReadonlyArray<readonly [
+    string,
+    readonly string[],
+    Readonly<Record<string, string | readonly string[]>>,
+]> = [
+    ['stage.yml', ['prepare', 'seal', 'stage'], { seal: 'prepare', stage: 'seal' }],
+    [
+        'finalize.yml',
+        ['verify_core', 'public_smoke', 'release'],
+        { public_smoke: 'verify_core', release: ['verify_core', 'public_smoke'] },
+    ],
 ];
 
 function readWorkflow(file: string): WorkflowFile {
@@ -131,22 +139,31 @@ describe('reusable workflow contract', () => {
         });
     }
 
-    for (const [file, jobs, dependent, dependency] of EXPECTED_JOB_GRAPH) {
+    for (const [file, jobs, dependencies] of EXPECTED_JOB_GRAPH) {
         it(`${file} contains exactly the designed job graph`, () => {
             const workflow = readWorkflow(file);
             expect(Object.keys(workflow.jobs ?? {})).toEqual([...jobs]);
-            expect(workflow.jobs?.[dependent]?.needs).toBe(dependency);
+            for (const [job, dependency] of Object.entries(dependencies)) {
+                expect(workflow.jobs?.[job]?.needs).toEqual(dependency);
+            }
             for (const job of jobs) {
                 expect(workflow.jobs?.[job]?.['runs-on']).toBe('ubuntu-24.04');
             }
         });
     }
 
-    it('stage.yml uploads exactly the candidate tarball and receipt', () => {
-        const upload = stepsOf(readWorkflow('stage.yml'), 'prepare').find(
+    it('stage.yml seals exactly the candidate tarball and receipt on a fresh runner', () => {
+        const workflow = readWorkflow('stage.yml');
+        const unsealed = stepsOf(workflow, 'prepare').find(
             (step) => (step.uses ?? '').includes('actions/upload-artifact'),
         );
-        expect(upload?.with?.name).toBe('sallyport-candidate-${{ github.sha }}');
+        expect(unsealed?.with?.path).toBe('${{ runner.temp }}/sallyport-out/package.tgz');
+        expect(unsealed?.with?.['retention-days']).toBe(1);
+        const upload = stepsOf(workflow, 'seal').find(
+            (step) => (step.uses ?? '').includes('actions/upload-artifact'),
+        );
+        expect(upload?.with?.name)
+            .toBe('sallyport-candidate-${{ github.sha }}-${{ github.run_attempt }}');
         expect(upload?.with?.['retention-days']).toBe(90);
         expect(upload?.with?.['if-no-files-found']).toBe('error');
         const paths = text(upload?.with?.path).trim().split('\n').map((line) => line.trim());
@@ -157,21 +174,22 @@ describe('reusable workflow contract', () => {
     });
 
     it('finalize.yml hands the verified bundle to the release job by artifact', () => {
-        const upload = stepsOf(readWorkflow('finalize.yml'), 'verify').find(
+        const upload = stepsOf(readWorkflow('finalize.yml'), 'verify_core').find(
             (step) => (step.uses ?? '').includes('actions/upload-artifact'),
         );
         const download = stepsOf(readWorkflow('finalize.yml'), 'release').find(
             (step) => (step.uses ?? '').includes('actions/download-artifact'),
         );
-        const name = 'sallyport-release-${{ inputs.candidate_run_id }}';
-        expect(upload?.with?.name).toBe(name);
+        expect(upload?.with?.name).toBe('sallyport-release-${{ inputs.candidate_run_id }}');
         expect(upload?.with?.['retention-days']).toBe(90);
         expect(upload?.with?.['if-no-files-found']).toBe('error');
-        expect(download?.with?.name).toBe(name);
+        expect(download?.with?.['artifact-ids'])
+            .toBe('${{ needs.verify_core.outputs.bundle_artifact_id }}');
     });
 
     it('stage.yml derives every release value from the tag rather than an input', () => {
-        const scripts = stepsOf(readWorkflow('stage.yml'), 'prepare')
+        const workflow = readWorkflow('stage.yml');
+        const scripts = [...stepsOf(workflow, 'prepare'), ...stepsOf(workflow, 'seal')]
             .map((step) => step.run ?? '')
             .join('\n');
         expect(scripts).toContain('internal inspect-source');
@@ -182,13 +200,40 @@ describe('reusable workflow contract', () => {
     });
 
     it('finalize.yml reverifies the source and the public bytes before writing', () => {
-        const scripts = stepsOf(readWorkflow('finalize.yml'), 'verify')
+        const scripts = stepsOf(readWorkflow('finalize.yml'), 'verify_core')
             .map((step) => step.run ?? '')
             .join('\n');
         expect(scripts).toContain('internal fetch-candidate');
         expect(scripts).toContain('internal inspect-source');
         expect(scripts).toContain('internal verify-public');
         expect(scripts).toContain('internal create-release-bundle');
+        expect(scripts).toContain('--skip-smoke');
+    });
+
+    it('passes artifacts across every trust boundary by immutable ID', () => {
+        const stage = readWorkflow('stage.yml');
+        const finalize = readWorkflow('finalize.yml');
+        const downloads = [
+            ...stepsOf(stage, 'seal'),
+            ...stepsOf(stage, 'stage'),
+            ...stepsOf(finalize, 'public_smoke'),
+            ...stepsOf(finalize, 'release'),
+        ].filter((step) => (step.uses ?? '').includes('actions/download-artifact'));
+        expect(downloads).toHaveLength(5);
+        for (const download of downloads) {
+            expect(download.with?.['artifact-ids']).toMatch(/^\$\{\{ (?:needs|steps)\./u);
+            expect(download.with?.name).toBeUndefined();
+        }
+    });
+
+    it('binds detached checkouts to a private default-branch ref and exact commit', () => {
+        for (const file of ['stage.yml', 'finalize.yml'] as const) {
+            const source = readFileSync(`${workflowDirectory}${file}`, 'utf8');
+            expect(source).toContain('refs/sallyport/default-branch');
+            expect(source).toContain('--default-branch-ref refs/sallyport/default-branch');
+            expect(source).toContain('--expected-commit "$SALLYPORT_COMMIT"');
+            expect(source).not.toContain('refs/remotes/origin/$SALLYPORT_DEFAULT_BRANCH');
+        }
     });
 
     it('finalize.yml publishes drafts first and never force-replaces a release', () => {

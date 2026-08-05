@@ -47,6 +47,8 @@ gh workflow run sallyport.yml -f candidate_run_id=<run-id>
 | Matching published release    | Successful no-op                     |
 | Same tag, different receipt   | Hard failure                         |
 | Same tag, different assets    | Hard failure                         |
+| Same tag, different title     | Hard failure                         |
+| Same tag, different notes     | Hard failure                         |
 | npm package missing           | Fail without writing                 |
 | npm bytes differ              | Critical failure                     |
 | Provenance missing or invalid | Fail without writing                 |
@@ -82,10 +84,10 @@ from a different candidate. Two different candidates claim one version. Do not
 delete or overwrite the release. Determine which candidate is authoritative,
 and treat an unexplained second candidate as a security event.
 
-**Same tag, different assets.** The existing release's assets do not match the
-verified bundle. Same handling: investigate, do not overwrite. Immutable
-Releases make published assets unchangeable, so a mismatch here means the
-release did not come from this candidate.
+**Same tag, different presentation or assets.** The existing release's title,
+body, or assets do not match the verified bundle. Same handling: investigate,
+do not overwrite. Immutable Releases make published assets unchangeable, so a
+mismatch here means the release did not come from this candidate.
 
 **npm package missing.** The version is not visible on the registry after the
 convergence window (30 attempts, 10-second interval, 5-minute bound). Either
@@ -107,10 +109,9 @@ this pipeline produced the published artifact.
 
 ## Failures before staging
 
-Failures inside `prepare` — invocation validation, metadata checks,
-`release:check`, the pack, or the exact-tarball smoke — have no external side
-effects. Nothing is staged, and nothing is published. Fix the repository, then
-either rerun the workflow or delete and recreate the tag as appropriate.
+Failures inside `prepare` or the clean `seal` job have no external side effects.
+Nothing is staged or published. Fix the repository, then rerun the workflow or
+delete and recreate the tag as appropriate.
 
 A failed exact-tarball smoke that reports a modified copy means `release:smoke`
 mutated the tarball it was handed. Fix the smoke script; see its contract in

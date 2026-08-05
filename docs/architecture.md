@@ -45,6 +45,9 @@ The architecture check fails on:
 - circular runtime dependencies;
 - runtime package dependencies without an explicit design decision.
 
-`npm run validate` runs this gate with type checks, rubric linting, the full
-test suite, and a package dry run. `npm run release:check` adds the coverage
-gate used for release qualification.
+`npm run validate` runs this gate with type checks, rubric linting, the protocol
+checkpoint guard, the full test suite, and a package dry run. The checkpoint
+guard rejects runtime changes after the SHA baked into `src/cli/pins.ts`;
+only version, lockfile, release notes, the pin, and the generated caller may sit
+above it. `npm run release:check` adds the coverage gate used for release
+qualification.

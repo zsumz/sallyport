@@ -52,6 +52,7 @@ function makeRun(): Record<string, unknown> {
         event: 'push',
         status: 'completed',
         conclusion: 'success',
+        run_attempt: 1,
         head_branch: 'v1.2.3',
         head_sha: COMMIT,
         repository: { id: REPOSITORY_ID, full_name: 'zsumz/demo' },
@@ -144,6 +145,14 @@ describe('validateCandidateRun', () => {
         expect(failures[0]).toContain('does not match the pinned finalizer');
     });
 
+    it('rejects a replayed receipt from another run attempt', () => {
+        const run = makeRun();
+        run.run_attempt = 2;
+        expect(validateCandidateRun({ run, expected: makeExpected() })).toStrictEqual([
+            'Workflow run attempt 2 does not match candidate attempt 1.',
+        ]);
+    });
+
     it('rejects a run id that does not match the receipt', () => {
         const run = makeRun();
         run.id = 987654321;
@@ -180,6 +189,7 @@ describe('validateCandidateRun', () => {
             'Workflow run has no workflow path.',
             'Workflow run event unknown is not a tag push.',
             'Workflow run concluded unknown, expected success.',
+            'Workflow run has no numeric attempt.',
             'Workflow run has no head branch.',
             'Workflow run has no head commit.',
         ]);

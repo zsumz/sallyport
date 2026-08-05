@@ -85,7 +85,7 @@ describe('runInit', () => {
         const content = generated();
         expect(content).toContain('    if: github.event_name == \'push\'');
         expect(content).toContain('    if: github.event_name == \'workflow_dispatch\'');
-        expect(content).toContain('      contents: read\n      id-token: write');
+        expect(content).toContain('      actions: read\n      contents: read\n      id-token: write');
         expect(content).toContain('      actions: read\n      contents: write');
         expect(content).toContain('candidate_run_id: ${{ inputs.candidate_run_id }}');
     });

@@ -34,5 +34,6 @@ export interface CandidateArtifactInput {
     fetchBuffer: FetchBuffer;
     target: GithubApiTarget;
     runId: number;
+    runAttempt: number;
     commit: string;
 }

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { hashTarball } from '../../../candidate/inspect.ts';
+import { assertCandidateTarball, hashTarball } from '../../../candidate/inspect.ts';
 import {
     buildCandidateReceipt,
     CANDIDATE_TARBALL_FILENAME,
@@ -64,7 +64,19 @@ export async function createCandidateCommand(
         throw failure('Candidate receipt failed:', [decision.error]);
     }
 
-    const digest = hashTarball(await readFile(tarballPath));
+    const tarball = await readFile(tarballPath);
+    const manifest = assertCandidateTarball(tarball);
+    const manifestFailures: string[] = [];
+    if (manifest.name !== name) {
+        manifestFailures.push(`packed package name ${manifest.name} does not match ${name}.`);
+    }
+    if (manifest.version !== version) {
+        manifestFailures.push(`packed package version ${manifest.version} does not match ${version}.`);
+    }
+    if (manifestFailures.length > 0) {
+        throw failure('Candidate receipt failed:', manifestFailures);
+    }
+    const digest = hashTarball(tarball);
     await assertStagedTarball(path.join(outputDir, CANDIDATE_TARBALL_FILENAME), digest);
 
     const receipt = buildCandidateReceipt({

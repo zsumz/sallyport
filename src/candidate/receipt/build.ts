@@ -61,6 +61,7 @@ export function buildReleaseRecord(parts: ReleaseRecordParts): ReleaseRecord {
         schema: RECEIPT_SCHEMA_VERSION,
         protocol: PROTOCOL,
         candidateReceiptSha256: parts.candidateReceiptSha256,
+        releaseNotesSha256: parts.releaseNotesSha256,
         package: {
             name: parts.package.name,
             version: parts.package.version,

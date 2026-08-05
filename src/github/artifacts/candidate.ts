@@ -11,7 +11,7 @@ export async function fetchCandidateArtifact(
     input: CandidateArtifactInput,
 ): Promise<CandidateArtifactFiles> {
     const artifacts = await listRunArtifacts(input.fetchJson, input.target, input.runId);
-    const artifact = selectCandidateArtifact(artifacts, input.commit);
+    const artifact = selectCandidateArtifact(artifacts, input.commit, input.runAttempt);
     const zip = await downloadArtifactZip(input.fetchBuffer, input.target, artifact);
     return extractCandidateArtifact(zip);
 }

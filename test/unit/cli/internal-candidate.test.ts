@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hashTarball } from '../../../src/candidate/inspect.ts';
@@ -215,6 +215,20 @@ describe('internal create-candidate', () => {
             tarball: { filename: 'package.tgz', sha256: outputs.sha256 },
             run: { id: 987654321, attempt: 1 },
         });
+    });
+
+    it('rejects a tarball whose packed manifest does not match the clean source', async () => {
+        await pack();
+        const attackerRoot = makeTempRoot('candidate-forge');
+        const attacker = createConsumer(attackerRoot, { name: 'forged-package' });
+        const attackerOut = path.join(attackerRoot, 'out');
+        await packCommand(['--consumer', attacker.dir, '--output', attackerOut], harness.effects);
+        copyFileSync(path.join(attackerOut, 'package.tgz'), path.join(outputDir, 'package.tgz'));
+
+        await expect(createCandidate()).rejects.toThrow(
+            /packed package name forged-package does not match sallyport-fixture/u,
+        );
+        removeTempRoot(attackerRoot);
     });
 
     it('summarizes the receipt for the workflow step summary', async () => {

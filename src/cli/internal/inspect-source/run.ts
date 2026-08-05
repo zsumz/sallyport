@@ -3,7 +3,10 @@ import path from 'node:path';
 import { readPackageMetadata, validatePackageContract } from '../../../contract/package.ts';
 import { releaseNotesPath } from '../../../contract/release.ts';
 import { deriveDistTag, releaseTagForVersion } from '../../../contract/semver.ts';
-import { verifyTagReachableFromBranch } from '../../../contract/signing.ts';
+import {
+    verifyTagCommit,
+    verifyTagReachableFromBranch,
+} from '../../../contract/signing.ts';
 import { optionalValue, parseArgv, requirePositiveInteger, requireValue } from '../../args.ts';
 import { failure, isFile } from '../../support.ts';
 import { parseProfile } from '../../template.ts';
@@ -23,7 +26,8 @@ export async function inspectSourceCommand(
     const tag = requireValue(parsed, 'tag');
     const repository = requireValue(parsed, 'repository');
     const repositoryId = requirePositiveInteger(parsed, 'repository-id');
-    const defaultBranch = requireValue(parsed, 'default-branch');
+    const defaultBranchRef = requireValue(parsed, 'default-branch-ref');
+    const expectedCommit = requireValue(parsed, 'expected-commit');
     const fingerprint = requestedFingerprint(optionalValue(parsed, 'signer-fingerprint'));
     const mode = parseMode(optionalValue(parsed, 'mode') ?? effects.env.SALLYPORT_MODE);
 
@@ -67,9 +71,18 @@ export async function inspectSourceCommand(
     if (profile === 'strict') {
         failures.push(...strictFailures(effects, consumerDir, tag, fingerprint));
     }
+    const commit = verifyTagCommit({
+        tag,
+        expectedCommit,
+        cwd: consumerDir,
+        exec: effects.exec,
+    });
+    if (!commit.ok) {
+        failures.push(...commit.failures);
+    }
     const reachable = verifyTagReachableFromBranch({
         tag,
-        branch: defaultBranch,
+        branch: defaultBranchRef,
         cwd: consumerDir,
         exec: effects.exec,
     });

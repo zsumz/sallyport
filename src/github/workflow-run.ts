@@ -84,6 +84,16 @@ export function validateCandidateRun(input: CandidateRunInput): string[] {
         );
     }
 
+    const runAttempt = readNumberProperty(run, 'run_attempt');
+    if (runAttempt === null) {
+        failures.push('Workflow run has no numeric attempt.');
+    } else if (runAttempt !== receipt.run.attempt) {
+        failures.push(
+            `Workflow run attempt ${String(runAttempt)}`
+            + ` does not match candidate attempt ${String(receipt.run.attempt)}.`,
+        );
+    }
+
     const headBranch = readStringProperty(run, 'head_branch');
     if (headBranch === null) {
         failures.push('Workflow run has no head branch.');

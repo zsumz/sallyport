@@ -4,6 +4,7 @@ import {
     type CommandRunner,
     normalizeFingerprint,
     verifySignedTag,
+    verifyTagCommit,
     verifyTagReachableFromBranch,
 } from '../../../src/contract/signing.ts';
 
@@ -203,7 +204,7 @@ describe('verifySignedTag', () => {
 
 describe('verifyTagReachableFromBranch', () => {
     const commit = 'a'.repeat(40);
-    const branch = 'origin/main';
+    const branch = 'refs/sallyport/default-branch';
 
     it('accepts a tag whose commit is an ancestor of the branch', () => {
         const { exec, calls } = fakeExec({
@@ -248,5 +249,35 @@ describe('verifyTagReachableFromBranch', () => {
             ok: false,
             failures: [`${TAG} must resolve to a commit.`],
         });
+    });
+});
+
+describe('verifyTagCommit', () => {
+    const commit = 'a'.repeat(40);
+
+    it('accepts only the exact peeled tag commit', () => {
+        const { exec } = fakeExec({
+            [`git rev-parse refs/tags/${TAG}^{commit}`]: `${commit}\n`,
+        });
+        expect(verifyTagCommit({ tag: TAG, expectedCommit: commit, cwd: CWD, exec }))
+            .toEqual({ ok: true });
+    });
+
+    it('rejects a moved tag', () => {
+        const moved = 'b'.repeat(40);
+        const { exec } = fakeExec({
+            [`git rev-parse refs/tags/${TAG}^{commit}`]: `${moved}\n`,
+        });
+        expect(verifyTagCommit({ tag: TAG, expectedCommit: commit, cwd: CWD, exec }))
+            .toEqual({
+                ok: false,
+                failures: [`${TAG} resolves to ${moved}, expected ${commit}.`],
+            });
+    });
+
+    it('rejects an unresolvable tag', () => {
+        const { exec } = fakeExec({});
+        expect(verifyTagCommit({ tag: TAG, expectedCommit: commit, cwd: CWD, exec }))
+            .toEqual({ ok: false, failures: [`${TAG} must resolve to a commit.`] });
     });
 });

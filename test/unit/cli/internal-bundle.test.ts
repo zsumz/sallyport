@@ -54,6 +54,7 @@ function releaseRecord(): ReleaseRecord {
     const { receipt, digest, receiptBytes } = candidate;
     return buildReleaseRecord({
         candidateReceiptSha256: sha256Hex(receiptBytes),
+        releaseNotesSha256: sha256Hex(Buffer.from(readTextFile(notesFile))),
         package: {
             name: receipt.package.name,
             version: receipt.package.version,
@@ -185,6 +186,14 @@ describe('internal create-release-bundle', () => {
         writeTextFile(notesFile, '');
 
         await expect(bundle()).rejects.toThrow('RELEASE_NOTES.md must not be empty.');
+    });
+
+    it('rejects release notes that differ from the authenticated digest', async () => {
+        writeTextFile(notesFile, 'altered after public verification\n');
+
+        await expect(bundle()).rejects.toThrow(
+            /releaseNotesSha256 .* does not match RELEASE_NOTES\.md/u,
+        );
     });
 
     it('reports a missing input file by name', async () => {

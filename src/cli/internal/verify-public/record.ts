@@ -8,6 +8,7 @@ import type { TarballDigest } from '../../../candidate/inspect.ts';
 export interface ReleaseRecordInput {
     receipt: CandidateReceipt;
     candidateReceiptSha256: string;
+    releaseNotesSha256: string;
     registryDigest: TarballDigest;
     signatureVerified: boolean;
     provenanceVerified: boolean;
@@ -17,6 +18,7 @@ export function createReleaseRecord(input: ReleaseRecordInput): ReleaseRecord {
     const { receipt } = input;
     return buildReleaseRecord({
         candidateReceiptSha256: input.candidateReceiptSha256,
+        releaseNotesSha256: input.releaseNotesSha256,
         package: {
             name: receipt.package.name,
             version: receipt.package.version,

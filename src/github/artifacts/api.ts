@@ -13,8 +13,8 @@ import {
     type RunArtifact,
 } from './model.ts';
 
-export function candidateArtifactName(commit: string): string {
-    return `sallyport-candidate-${commit}`;
+export function candidateArtifactName(commit: string, runAttempt: number): string {
+    return `sallyport-candidate-${commit}-${String(runAttempt)}`;
 }
 
 export function githubHeaders(token: string): Record<string, string> {
@@ -53,8 +53,9 @@ export async function listRunArtifacts(
 export function selectCandidateArtifact(
     artifacts: readonly RunArtifact[],
     commit: string,
+    runAttempt: number,
 ): RunArtifact {
-    const name = candidateArtifactName(commit);
+    const name = candidateArtifactName(commit, runAttempt);
     const matches = artifacts.filter((artifact) => artifact.name === name);
     const artifact = matches[0];
     if (artifact === undefined) {

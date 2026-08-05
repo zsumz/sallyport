@@ -39,6 +39,7 @@ function candidateParts(): CandidateReceiptParts {
 function releaseParts(): ReleaseRecordParts {
     return {
         candidateReceiptSha256: RECEIPT_DIGEST.sha256,
+        releaseNotesSha256: RECEIPT_DIGEST.sha256,
         package: { name: 'smoque', version: '0.1.2', distTag: 'latest' },
         candidate: { sha256: DIGEST.sha256, sha512: DIGEST.sha512 },
         registry: {
@@ -133,6 +134,7 @@ describe('buildReleaseRecord', () => {
             'schema',
             'protocol',
             'candidateReceiptSha256',
+            'releaseNotesSha256',
             'package',
             'candidate',
             'registry',
@@ -262,6 +264,16 @@ describe('validateReleaseRecord', () => {
         expect(validateReleaseRecord({ ...record, candidateReceiptSha256: DIGEST.sha512 }))
             .toContain(
                 'candidateReceiptSha256 must be a 64-character lowercase hexadecimal SHA-256'
+                + ' digest.',
+            );
+    });
+
+    it('rejects a release notes digest that is not sha256', () => {
+        const record = buildReleaseRecord(releaseParts());
+
+        expect(validateReleaseRecord({ ...record, releaseNotesSha256: DIGEST.sha512 }))
+            .toContain(
+                'releaseNotesSha256 must be a 64-character lowercase hexadecimal SHA-256'
                 + ' digest.',
             );
     });

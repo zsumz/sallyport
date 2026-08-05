@@ -16,7 +16,8 @@ import {
 import type { FetchBuffer, FetchJson } from '../../../src/registry/download.ts';
 
 const COMMIT = 'b'.repeat(40);
-const ARTIFACT_NAME = `sallyport-candidate-${COMMIT}`;
+const RUN_ATTEMPT = 2;
+const ARTIFACT_NAME = `sallyport-candidate-${COMMIT}-${String(RUN_ATTEMPT)}`;
 const TARBALL = new Uint8Array(Buffer.from('a fake gzipped npm tarball'));
 const RECEIPT = new Uint8Array(Buffer.from('{"schema":1,"protocol":"sallyport/0.1"}'));
 
@@ -204,26 +205,42 @@ describe('extractCandidateArtifact', () => {
 
 describe('selectCandidateArtifact', () => {
     it('derives the artifact name from the tag commit', () => {
-        expect(candidateArtifactName(COMMIT)).toBe(ARTIFACT_NAME);
+        expect(candidateArtifactName(COMMIT, RUN_ATTEMPT)).toBe(ARTIFACT_NAME);
     });
 
     it('finds the candidate artifact', () => {
-        expect(selectCandidateArtifact([artifact({ name: 'other' }), artifact()], COMMIT).id)
+        expect(selectCandidateArtifact(
+            [artifact({ name: 'other' }), artifact()],
+            COMMIT,
+            RUN_ATTEMPT,
+        ).id)
             .toBe(11);
     });
 
     it('rejects a missing artifact', () => {
-        expect(() => selectCandidateArtifact([artifact({ name: 'other' })], COMMIT))
+        expect(() => selectCandidateArtifact(
+            [artifact({ name: 'other' })],
+            COMMIT,
+            RUN_ATTEMPT,
+        ))
             .toThrow('is not present on the run');
     });
 
     it('rejects an expired artifact', () => {
-        expect(() => selectCandidateArtifact([artifact({ expired: true })], COMMIT))
+        expect(() => selectCandidateArtifact(
+            [artifact({ expired: true })],
+            COMMIT,
+            RUN_ATTEMPT,
+        ))
             .toThrow('has expired');
     });
 
     it('rejects duplicate artifacts', () => {
-        expect(() => selectCandidateArtifact([artifact(), artifact({ id: 12 })], COMMIT))
+        expect(() => selectCandidateArtifact(
+            [artifact(), artifact({ id: 12 })],
+            COMMIT,
+            RUN_ATTEMPT,
+        ))
             .toThrow('is present 2 times');
     });
 });
@@ -329,6 +346,7 @@ describe('fetchCandidateArtifact', () => {
             fetchBuffer,
             target: target(),
             runId: 555,
+            runAttempt: RUN_ATTEMPT,
             commit: COMMIT,
         })).resolves.toStrictEqual({ tarball: TARBALL, receipt: RECEIPT });
     });

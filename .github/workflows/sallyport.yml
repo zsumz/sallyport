@@ -22,6 +22,7 @@ jobs:
   stage:
     if: github.event_name == 'push'
     permissions:
+      actions: read
       contents: read
       id-token: write
     uses: zsumz/sallyport/.github/workflows/stage.yml@de73f99ebfd32d149964aa0f4f0bd0931fa31ca2

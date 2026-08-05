@@ -34,7 +34,11 @@ beforeEach(() => {
     candidate = buildCandidate(root);
     outputDir = path.join(root, 'sallyport-candidate');
     runOverrides = {};
-    artifactName = `sallyport-candidate-${candidate.consumer.commit}`;
+    artifactName = [
+        'sallyport-candidate',
+        candidate.consumer.commit,
+        String(candidate.receipt.run.attempt),
+    ].join('-');
     zipFiles = [
         { name: 'package.tgz', data: candidate.tarball },
         { name: 'candidate.json', data: candidate.receiptBytes },
@@ -81,6 +85,7 @@ function runBody(): Record<string, unknown> {
         path: '.github/workflows/sallyport.yml',
         event: 'push',
         conclusion: 'success',
+        run_attempt: candidate.receipt.run.attempt,
         head_branch: `v${candidate.consumer.version}`,
         head_sha: candidate.consumer.commit,
         ...runOverrides,

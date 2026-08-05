@@ -44,6 +44,7 @@ export interface ReleaseRecord {
     schema: number;
     protocol: string;
     candidateReceiptSha256: string;
+    releaseNotesSha256: string;
     package: {
         name: string;
         version: string;
@@ -78,6 +79,7 @@ export interface CandidateReceiptParts {
 
 export interface ReleaseRecordParts {
     candidateReceiptSha256: string;
+    releaseNotesSha256: string;
     package: ReleaseRecord['package'];
     candidate: ReleaseRecord['candidate'];
     registry: ReleaseRecord['registry'];

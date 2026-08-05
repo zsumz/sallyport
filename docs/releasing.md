@@ -46,14 +46,22 @@ Releases enabled.
 ## Prepare
 
 1. Start from a clean, current default branch.
-2. Update `package.json` and `package-lock.json` to the same version.
-3. Add concise notes at `docs/releases/v<version>.md`.
-4. Run `npm run release:check`.
-5. Run `npx sallyport@alpha check`.
-6. Run `npx sallyport@alpha check --remote` with authenticated GitHub and npm
+2. Finish every reusable-workflow, CLI, schema, test, and release-runtime
+   change, then commit that complete implementation checkpoint.
+3. Record that commit's full SHA in `src/cli/pins.ts` and both generated caller
+   refs. A commit cannot pin itself.
+4. After the checkpoint, change only the release layer: `package.json`,
+   `package-lock.json`, `src/cli/pins.ts`, `.github/workflows/sallyport.yml`,
+   and `docs/releases/v<version>.md`. CI rejects any other path after the pin.
+5. Update `package.json` and `package-lock.json` to the same version and add
+   concise notes at `docs/releases/v<version>.md`.
+6. Run `npm run release:check`. Its protocol-pin gate proves the pinned commit
+   contains the complete implementation, not merely the last workflow edit.
+7. Run `npx sallyport@alpha check`.
+8. Run `npx sallyport@alpha check --remote` with authenticated GitHub and npm
    CLIs. Resolve every `FAIL`; manually confirm any `UNVERIFIED` npm setting.
-7. Commit as `chore(release): v<version>` with the configured OpenPGP key.
-8. Push and wait for the complete CI matrix.
+9. Commit as `chore(release): v<version>` with the configured OpenPGP key.
+10. Push and wait for the complete CI matrix.
 
 ## Stage
 
@@ -64,10 +72,10 @@ git tag --sign v<version> -m "sallyport v<version>"
 git push origin v<version>
 ```
 
-The caller's `stage` job verifies the tag, signer fingerprint, package
-metadata, release notes, and default-branch ancestry, reruns the release gate,
-packs and smokes exactly one tarball, and uploads that tarball with
-`npm stage publish`. It cannot publish directly.
+The caller's `prepare` job runs the package gate and emits only a tarball. A
+fresh `seal` job rebinds the tag, commit, signer, branch, manifest, and digests
+before authoring the receipt. The OIDC job downloads that sealed artifact by ID
+and stages it. It cannot publish directly.
 
 Note the stage ID and the candidate run ID from the staging summary.
 

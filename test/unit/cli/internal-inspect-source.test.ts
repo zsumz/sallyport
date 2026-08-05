@@ -34,7 +34,8 @@ function args(overrides: Partial<Record<string, string>> = {}): string[] {
         '--tag': `v${consumer.version}`,
         '--repository': 'zsumz/fake',
         '--repository-id': REPOSITORY_ID,
-        '--default-branch': 'main',
+        '--default-branch-ref': 'main',
+        '--expected-commit': consumer.commit,
         ...overrides,
     };
     return Object.entries(values).flatMap(([flag, value]) => [flag, value]);
@@ -84,7 +85,11 @@ describe('internal inspect-source', () => {
         const harness = createEffects(alphaRoot, { registry: jsonRegistry(absentRegistry) });
 
         await inspectSourceCommand(
-            args({ '--consumer': alpha.dir, '--tag': 'v2.0.0-alpha.4' }),
+            args({
+                '--consumer': alpha.dir,
+                '--tag': 'v2.0.0-alpha.4',
+                '--expected-commit': alpha.commit,
+            }),
             harness.effects,
         );
 
@@ -166,7 +171,7 @@ describe('internal inspect-source', () => {
         const harness = createEffects(root, { registry: jsonRegistry(absentRegistry) });
 
         await expect(inspectSourceCommand(
-            args({ '--default-branch': 'release-branch' }),
+            args({ '--default-branch-ref': 'release-branch' }),
             harness.effects,
         )).rejects.toThrow(/must point to a commit reachable from release-branch/u);
     });

@@ -9,6 +9,7 @@
     "schema",
     "protocol",
     "candidateReceiptSha256",
+    "releaseNotesSha256",
     "package",
     "candidate",
     "registry",
@@ -25,6 +26,11 @@
     },
     "candidateReceiptSha256": {
       "description": "SHA-256 of the candidate receipt this release was finalized from.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "releaseNotesSha256": {
+      "description": "SHA-256 of the committed release notes used as the release body and asset.",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },

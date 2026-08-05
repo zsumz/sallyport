@@ -10,7 +10,7 @@ import {
     type GithubApiTarget,
 } from '../../../github/artifacts.ts';
 import { CALLER_WORKFLOW_PATH, validateCandidateRun } from '../../../github/workflow-run.ts';
-import { readStringProperty } from '../../../registry/download.ts';
+import { readNumberProperty, readStringProperty } from '../../../registry/download.ts';
 import { parseArgv, requirePositiveInteger, requireValue } from '../../args.ts';
 import { normalizeCommitSha } from '../../pins.ts';
 import { ensureDirectory, failure } from '../../support.ts';
@@ -45,9 +45,15 @@ export async function fetchCandidateCommand(
 
     const run = await fetchWorkflowRun(effects, target, runId);
     const commit = readStringProperty(run, 'head_sha');
+    const runAttempt = readNumberProperty(run, 'run_attempt');
     if (commit === null || normalizeCommitSha(commit) === null) {
         throw failure('Candidate retrieval failed:', [
             `workflow run ${String(runId)} reports no head commit.`,
+        ]);
+    }
+    if (runAttempt === null || !Number.isSafeInteger(runAttempt) || runAttempt < 1) {
+        throw failure('Candidate retrieval failed:', [
+            `workflow run ${String(runId)} reports no valid attempt.`,
         ]);
     }
 
@@ -56,6 +62,7 @@ export async function fetchCandidateCommand(
         fetchBuffer: effects.registry.fetchBuffer,
         target,
         runId,
+        runAttempt,
         commit,
     });
     const receipt = parseReceipt(files.receipt);

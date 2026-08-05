@@ -69,6 +69,7 @@ export function validReleaseRecord(): ReleaseRecord {
         schema: 1,
         protocol: 'sallyport/0.1',
         candidateReceiptSha256: RECEIPT.sha256,
+        releaseNotesSha256: RECEIPT.sha256,
         package: {
             name: 'smoque',
             version: '0.1.2',

@@ -48,6 +48,13 @@ function consistencyFailures(
             + ` does not match the bundled ${CANDIDATE_RECEIPT_NAME} ${receiptDigest}.`,
         );
     }
+    const notesDigest = sha256Hex(bundled.notes);
+    if (release.releaseNotesSha256 !== notesDigest) {
+        failures.push(
+            `${RELEASE_RECORD_FILENAME} releaseNotesSha256 ${release.releaseNotesSha256}`
+            + ` does not match ${RELEASE_NOTES_FILENAME} ${notesDigest}.`,
+        );
+    }
     const sha256 = sha256Hex(bundled.tarball);
     const sha512 = sha512Hex(bundled.tarball);
     failures.push(...digestFailure('candidate.sha256', release.candidate.sha256, sha256));
