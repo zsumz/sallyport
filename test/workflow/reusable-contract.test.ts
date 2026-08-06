@@ -257,6 +257,10 @@ describe('reusable workflow contract', () => {
         expect(scripts).toMatch(/'--draft',/);
         expect(scripts).toMatch(/'--verify-tag',/);
         expect(scripts).toMatch(/'--draft=false'/);
+        expect(scripts).toContain('args.push(\'--prerelease\')');
+        expect(scripts)
+            .toContain('prerelease: prerelease === undefined ? \'false\' : \'true\'');
+        expect(scripts).toContain('release.prerelease !== prerelease');
         expect(scripts).toContain('execFileSync');
         expect(scripts).not.toMatch(/\bgh\s+release\b/);
     });
