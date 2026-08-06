@@ -9,7 +9,7 @@ what each setting protects.
 From the repository root:
 
 ```sh
-npx sallyport@alpha init --strict
+npx sallyport init --strict
 ```
 
 `init` reads `package.json` and `package-lock.json`, detects the GitHub
@@ -24,7 +24,7 @@ command and the environment checklist, and finishes by running
 Use plain `init` for the standard profile:
 
 ```sh
-npx sallyport@alpha init
+npx sallyport init
 ```
 
 `init` does not invent a smoke test. Writing `release:smoke` is the consumer's
@@ -120,7 +120,7 @@ GitHub omits `bypass_actors` when the caller cannot inspect it. In that case
 ## 7. Verify
 
 ```sh
-npx sallyport@alpha check
+npx sallyport check
 ```
 
 `check` inspects local deterministic state only and prints one line per
@@ -144,13 +144,13 @@ PASS no direct npm publish workflow exists
 For CI or scripting:
 
 ```sh
-npx sallyport@alpha check --json
+npx sallyport check --json
 ```
 
 Audit the external settings after authenticating `gh` and npm:
 
 ```sh
-npx sallyport@alpha check --remote
+npx sallyport check --remote
 ```
 
 The remote pass adds checks for both GitHub environments, stage-only npm
@@ -169,7 +169,7 @@ trusted publisher without storing a credential.
 ## Upgrading
 
 ```sh
-npx sallyport@alpha init --upgrade
+npx sallyport init --upgrade
 ```
 
 `--upgrade` atomically updates both reusable-workflow SHAs so stage and

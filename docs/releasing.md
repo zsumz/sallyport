@@ -55,8 +55,8 @@ Releases enabled.
    changes permitted above the checkpoint. CI rejects every other field or path.
 5. Run `npm run release:check`. Its protocol-pin gate proves the pinned commit
    contains the complete implementation, not merely the last workflow edit.
-6. Run `npx sallyport@alpha check`.
-7. Run `npx sallyport@alpha check --remote` with authenticated GitHub and npm
+6. Run `npx sallyport check`.
+7. Run `npx sallyport check --remote` with authenticated GitHub and npm
    CLIs. Resolve every `FAIL`; manually confirm any `UNVERIFIED` npm setting.
 8. Commit as `chore(release): v<version>` with the configured OpenPGP key.
 9. Push and wait for the complete CI matrix.

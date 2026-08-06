@@ -1,6 +1,6 @@
 {
   "name": "sallyport",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0",
   "description": "Staged npm releases for GitHub Actions, without publishing tokens.",
   "author": "zsumz <shawn@zsumz.com>",
   "repository": {
@@ -41,8 +41,7 @@
     "ci"
   ],
   "publishConfig": {
-    "access": "public",
-    "tag": "alpha"
+    "access": "public"
   },
   "sallyport": {
     "requiredStatusChecks": [

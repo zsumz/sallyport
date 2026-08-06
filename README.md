@@ -27,8 +27,8 @@
 ## Start
 
 ```sh
-npx sallyport@alpha init --strict
-npx sallyport@alpha check
+npx sallyport init --strict
+npx sallyport check
 ```
 
 `init` writes a caller workflow pinned to the installed sallyport commit. `check`
