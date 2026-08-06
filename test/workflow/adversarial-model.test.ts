@@ -164,8 +164,9 @@ describe('adversarial release model', () => {
         expect(release).toContain('object.sha !== commit');
         expect(release).toMatch(/assertTagTarget\(\);\s+const paths =/u);
         expect(release).toMatch(
-            /assertTagTarget\(\);\s+const result = gh\(\['release', 'edit'/u,
+            /assertTagTarget\(\);\s+const args = \['release', 'edit'/u,
         );
+        expect(release).toContain('const result = gh(args);');
     });
 
     it('replay authenticates release notes and presentation metadata', () => {
@@ -174,6 +175,7 @@ describe('adversarial release model', () => {
         expect(release).toContain('release.releaseNotesSha256');
         expect(release).toContain('release.name !== title');
         expect(release).toContain('release.body !== notes');
+        expect(release).toContain('release.prerelease !== prerelease');
         expect(release).not.toContain('\'--clobber\'');
     });
 });

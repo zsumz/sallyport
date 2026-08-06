@@ -648,6 +648,7 @@ jobs:
               package_name: releasePackage.name,
               package_version: releasePackage.version,
               dist_tag: releasePackage.distTag,
+              prerelease: prerelease === undefined ? 'false' : 'true',
           };
           const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join('');
           appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', lines);
@@ -662,6 +663,7 @@ jobs:
           SALLYPORT_TAG_OBJECT: ${{ steps.bundle.outputs.tag_object }}
           SALLYPORT_COMMIT: ${{ steps.bundle.outputs.commit }}
           SALLYPORT_TITLE: ${{ steps.bundle.outputs.title }}
+          SALLYPORT_PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
           import { execFileSync } from 'node:child_process';
@@ -681,6 +683,8 @@ jobs:
           const tagObject = process.env.SALLYPORT_TAG_OBJECT ?? '';
           const commit = process.env.SALLYPORT_COMMIT ?? '';
           const title = process.env.SALLYPORT_TITLE ?? '';
+          const prereleaseValue = process.env.SALLYPORT_PRERELEASE ?? '';
+          const prerelease = prereleaseValue === 'true';
           const notes = readFileSync(join(directory, 'RELEASE_NOTES.md'), 'utf8');
 
           const fail = (message) => {
@@ -713,6 +717,9 @@ jobs:
           }
           if (!/^[0-9a-f]{40}$/.test(tagObject)) {
               fail('The release tag object is malformed.');
+          }
+          if (prereleaseValue !== 'true' && prereleaseValue !== 'false') {
+              fail('The prerelease flag is malformed.');
           }
 
           const digests = new Map(ASSETS.map((name) => [
@@ -766,6 +773,9 @@ jobs:
               if (release.body !== notes) {
                   conflicts.push('release notes differ from the verified bundle');
               }
+              if (release.prerelease !== prerelease) {
+                  conflicts.push('release prerelease state differs from the verified bundle');
+              }
               const assets = Array.isArray(release.assets) ? release.assets : [];
               for (const asset of assets) {
                   const name = typeof asset.name === 'string' ? asset.name : '';
@@ -804,7 +814,11 @@ jobs:
 
           const publish = () => {
               assertTagTarget();
-              const result = gh(['release', 'edit', tag, '--repo', repository, '--draft=false']);
+              const args = ['release', 'edit', tag, '--repo', repository, '--draft=false'];
+              if (prerelease) {
+                  args.push('--prerelease');
+              }
+              const result = gh(args);
               if (!result.ok) {
                   fail(`Unable to publish the GitHub release: ${result.stderr.trim()}`);
               }
@@ -812,14 +826,18 @@ jobs:
 
           if (existing === null) {
               assertTagTarget();
-              const created = gh([
+              const args = [
                   'release', 'create', tag,
                   '--repo', repository,
                   '--draft',
                   '--verify-tag',
                   '--title', title,
                   '--notes-file', join(directory, 'RELEASE_NOTES.md'),
-              ]);
+              ];
+              if (prerelease) {
+                  args.push('--prerelease');
+              }
+              const created = gh(args);
               if (!created.ok) {
                   fail(`Unable to create the draft GitHub release: ${created.stderr.trim()}`);
               }
