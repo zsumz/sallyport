@@ -3,9 +3,17 @@ import type {
     CommandRunner,
     SignedTagRequest,
     TagCommitRequest,
+    TagObjectRequest,
     TagReachabilityRequest,
     VerificationResult,
 } from './model.ts';
+
+export function resolveTagObject(request: TagObjectRequest): string | null {
+    const object = gitOutput(request.exec, request.cwd, [
+        'rev-parse', `refs/tags/${request.tag}`,
+    ])?.trim();
+    return object !== undefined && /^[0-9a-f]{40}$/u.test(object) ? object : null;
+}
 
 export function verifySignedTag(request: SignedTagRequest): VerificationResult {
     const { tag } = request;

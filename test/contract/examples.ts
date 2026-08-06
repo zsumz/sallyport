@@ -20,6 +20,7 @@ export function validCandidateReceipt(): CandidateReceipt {
         },
         source: {
             tag: 'v0.1.2',
+            tagObject: 'abcdef0123456789abcdef0123456789abcdef01',
             commit: 'fedcba9876543210fedcba9876543210fedcba98',
             signed: true,
             signerFingerprint: 'B58439871CD2A7275B20CC19EC8E4D26598A0373',

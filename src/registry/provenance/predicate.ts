@@ -42,9 +42,6 @@ export function buildFailures(statement: unknown, expected: ExpectedProvenance):
 }
 
 function runFailures(predicate: unknown, expected: ExpectedProvenance): string[] {
-    if (expected.runId === undefined) {
-        return [];
-    }
     const invocation = readStringProperty(
         readProperty(readProperty(predicate, 'runDetails'), 'metadata'),
         'invocationId',

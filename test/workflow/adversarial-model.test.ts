@@ -43,6 +43,10 @@ function action(file: string, name: string, actionName: string): Step {
     return step;
 }
 
+function stepIndex(file: string, name: string, matches: (step: Step) => boolean): number {
+    return (job(file, name).steps ?? []).findIndex(matches);
+}
+
 describe('adversarial release model', () => {
     it('a malicious postinstall can emit bytes but cannot author the candidate receipt', () => {
         const prepare = scripts('stage.yml', 'prepare');
@@ -81,6 +85,23 @@ describe('adversarial release model', () => {
             .with?.['artifact-ids'])
             .toBe('${{ needs.seal.outputs.candidate_artifact_id }}');
         expect(scripts('stage.yml', 'candidate_smoke')).toContain('internal smoke');
+        const install = stepIndex('stage.yml', 'candidate_smoke', (step) => step.run === 'npm ci');
+        const checkout = stepIndex(
+            'stage.yml',
+            'candidate_smoke',
+            (step) => step.with?.repository === 'zsumz/sallyport',
+        );
+        const download = stepIndex(
+            'stage.yml',
+            'candidate_smoke',
+            (step) => (step.uses ?? '').includes('actions/download-artifact'),
+        );
+        expect(install).toBeGreaterThan(-1);
+        expect(checkout).toBeGreaterThan(install);
+        expect(download).toBeGreaterThan(checkout);
+        const smokeScripts = scripts('stage.yml', 'candidate_smoke');
+        expect(smokeScripts).toContain('createHash(\'sha256\')');
+        expect(smokeScripts).toContain('sealed package.tgz does not match candidate.json');
         expect((smoke.steps ?? []).some((step) => (step.uses ?? '').includes('upload-artifact')))
             .toBe(false);
         expect(smoke.outputs).toBeUndefined();
@@ -96,6 +117,16 @@ describe('adversarial release model', () => {
             .toBe(false);
         expect(smoke.outputs).toBeUndefined();
         expect(releaseJob.needs).toEqual(['verify_core', 'public_smoke']);
+        const install = stepIndex('finalize.yml', 'public_smoke', (step) => step.run === 'npm ci');
+        const download = stepIndex(
+            'finalize.yml',
+            'public_smoke',
+            (step) => (step.uses ?? '').includes('actions/download-artifact'),
+        );
+        expect(download).toBeGreaterThan(install);
+        const smokeScripts = scripts('finalize.yml', 'public_smoke');
+        expect(smokeScripts).toContain('smoke copy after smoke');
+        expect(smokeScripts).toContain('authoritative package.tgz after smoke');
         expect(action('finalize.yml', 'release', 'actions/download-artifact').with?.['artifact-ids'])
             .toBe('${{ needs.verify_core.outputs.bundle_artifact_id }}');
         const release = scripts('finalize.yml', 'release');
@@ -112,6 +143,8 @@ describe('adversarial release model', () => {
         }
         const release = scripts('finalize.yml', 'release');
         expect(release).toContain('assertTagTarget();');
+        expect(release).toContain('object?.sha !== tagObject');
+        expect(release).toContain('no longer references verified object');
         expect(release).toContain('object.sha !== commit');
         expect(release).toMatch(/assertTagTarget\(\);\s+const paths =/u);
         expect(release).toMatch(

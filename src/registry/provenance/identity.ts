@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 
 import { readArrayProperty, readProperty, readStringProperty } from '../download.ts';
+import { certificateFailures } from './certificate.ts';
 import { buildFailures } from './predicate.ts';
 import {
     UNRECOGNIZED,
@@ -15,9 +16,7 @@ export function verifyProvenanceBundle(input: ProvenanceBundleInput): string[] {
     const label = `${expected.packageName}@${expected.packageVersion}`;
     const { bundle } = input;
     const failures: string[] = [];
-    if (!hasSigningCertificate(bundle)) {
-        failures.push(`${UNRECOGNIZED}: the provenance bundle carries no signing certificate.`);
-    }
+    failures.push(...certificateFailures(bundle, expected));
     const statement = decodeStatement(bundle);
     if (statement === null) {
         failures.push(`${UNRECOGNIZED}: the provenance payload could not be decoded for ${label}.`);
@@ -26,20 +25,6 @@ export function verifyProvenanceBundle(input: ProvenanceBundleInput): string[] {
     failures.push(...subjectFailures(statement, expected));
     failures.push(...buildFailures(statement, expected));
     return failures;
-}
-
-function hasSigningCertificate(bundle: unknown): boolean {
-    const material = readProperty(bundle, 'verificationMaterial');
-    if (readStringProperty(readProperty(material, 'certificate'), 'rawBytes') !== null) {
-        return true;
-    }
-    const chain = readArrayProperty(
-        readProperty(material, 'x509CertificateChain'),
-        'certificates',
-    );
-    return chain !== null
-        && chain.length > 0
-        && readStringProperty(chain[0], 'rawBytes') !== null;
 }
 
 function decodeStatement(bundle: unknown): unknown {

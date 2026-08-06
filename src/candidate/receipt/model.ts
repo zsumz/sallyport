@@ -17,6 +17,7 @@ export interface CandidateReceipt {
     };
     source: {
         tag: string;
+        tagObject: string;
         commit: string;
         signed: boolean;
         signerFingerprint: string | null;

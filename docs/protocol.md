@@ -306,7 +306,7 @@ authoritative candidate receipt (`candidate.json`):
   "protocol": "sallyport/0.1",
   "sallyport": { "version": "0.1.0", "workflow": "zsumz/sallyport/.github/workflows/stage.yml", "sha": "<40-hex>" },
   "repository": { "name": "zsumz/smoque", "id": 1286348597, "defaultBranch": "main" },
-  "source": { "tag": "v0.1.2", "commit": "<40-hex>", "signed": true, "signerFingerprint": "B58439871CD2A7275B20CC19EC8E4D26598A0373" },
+  "source": { "tag": "v0.1.2", "tagObject": "<40-hex>", "commit": "<40-hex>", "signed": true, "signerFingerprint": "B58439871CD2A7275B20CC19EC8E4D26598A0373" },
   "package": { "name": "smoque", "version": "0.1.2", "access": "public", "distTag": "latest" },
   "tarball": { "filename": "package.tgz", "bytes": 123456, "sha256": "...", "sha512": "...", "integrity": "sha512-..." },
   "run": { "id": 123456789, "attempt": 1 }
@@ -322,11 +322,13 @@ artifact ID is handed to `candidate_smoke` and `stage`.
 
 Permissions: `actions: read`, `contents: read`. No OIDC or write access.
 
-This job downloads the sealed candidate by immutable artifact ID, checks out
-the exact consumer and sallyport commits, installs dependencies, and runs
-`release:smoke` against a copy of the sealed `package.tgz`. sallyport verifies
-that the copy was not modified. The job uploads nothing and exposes no output;
-only its success is consumed by `stage`.
+This job checks out the exact consumer commit and installs dependencies before
+trusted bytes or trusted code exist on the runner. It then checks out the exact
+sallyport commit, downloads the sealed candidate by immutable artifact ID, and
+validates its byte length, SHA-256, SHA-512, and SRI against `candidate.json`.
+`release:smoke` runs against a copy; sallyport hashes the copy and authoritative
+tarball again afterward. The job uploads nothing and exposes no output; only
+its success is consumed by `stage`.
 
 ### Job 4: `stage`
 
@@ -441,10 +443,11 @@ listed in `SHA256SUMS`; the immutable bundle artifact ID is a job output.
 
 Permissions: `actions: read`, `contents: read`. No OIDC or write access.
 
-This separate job downloads the sealed bundle by artifact ID, checks out the
-exact consumer commit, installs dependencies, and runs `release:smoke` against
-a copy of the sealed public bytes. It uploads no artifact and exposes no output;
-the release job consumes only its success status.
+This separate job installs the exact consumer's dependencies first, then
+downloads the sealed bundle by artifact ID. Embedded workflow code validates
+`candidate.json` and every tarball digest, runs `release:smoke` against a copy,
+and rehashes both the copy and authoritative tarball afterward. It uploads no
+artifact and exposes no output; the release job consumes only its success.
 
 ### Job 3: `release`
 
@@ -458,8 +461,9 @@ It downloads the exact bundle artifact ID from `verify_core`, resolves the
 originating sealed-candidate artifact from the candidate run, downloads that
 artifact by ID, and requires byte-for-byte receipt and tarball equality. It
 then rechecks every hash and independently binds the run, attempt, repository,
-workflow, workflow SHA, tag, commit, profile, and signer to GitHub context. It
-re-peels the tag immediately before each write, then publishes draft-first:
+workflow, workflow SHA, tag, exact tag object, commit, profile, and signer to
+GitHub context. It requires the live tag ref to equal the recorded object before
+each write, then peels that object to the verified commit and publishes draft-first:
 
 1. Create a draft GitHub Release for the existing tag.
 2. Add the committed release notes.

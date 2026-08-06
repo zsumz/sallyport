@@ -14,6 +14,7 @@ import {
     type CandidateFixture,
     type TestEffects,
 } from './fixture.ts';
+import { certificateRawBytes } from '../registry/certificate-fixture.ts';
 
 interface RecordedCommand {
     command: string;
@@ -157,10 +158,28 @@ function attestations(payload: Record<string, unknown> = statement()): Record<st
 }
 
 function attestationEntries(payload: Record<string, unknown> = statement()): unknown[] {
+    const receipt = candidate.receipt;
     return [{
         predicateType: 'https://slsa.dev/provenance/v1',
         bundle: {
-            verificationMaterial: { certificate: { rawBytes: 'Y2VydA==' } },
+            verificationMaterial: {
+                certificate: {
+                    rawBytes: certificateRawBytes({
+                        packageName: receipt.package.name,
+                        packageVersion: receipt.package.version,
+                        repository: receipt.repository.name,
+                        repositoryId: receipt.repository.id,
+                        workflowPath: '.github/workflows/sallyport.yml',
+                        builderWorkflow: receipt.sallyport.workflow,
+                        builderSha: receipt.sallyport.sha,
+                        tagRef: receipt.source.tag,
+                        sourceCommit: receipt.source.commit,
+                        tarballSha512: receipt.tarball.sha512,
+                        runId: receipt.run.id,
+                        runAttempt: receipt.run.attempt,
+                    }),
+                },
+            },
             dsseEnvelope: {
                 payload: Buffer.from(JSON.stringify(payload)).toString('base64'),
             },

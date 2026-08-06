@@ -26,6 +26,7 @@ function candidateParts(): CandidateReceiptParts {
         repository: { name: 'zsumz/smoque', id: 1286348597, defaultBranch: 'main' },
         source: {
             tag: 'v0.1.2',
+            tagObject: 'abcdef0123456789abcdef0123456789abcdef01',
             commit: COMMIT,
             signed: true,
             signerFingerprint: 'B58439871CD2A7275B20CC19EC8E4D26598A0373',

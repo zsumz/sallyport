@@ -21,7 +21,7 @@ import {
 const ROOT_KEYS = ['schema', 'protocol', 'sallyport', 'repository', 'source', 'package', 'tarball', 'run'];
 const SALLYPORT_KEYS = ['version', 'workflow', 'sha'];
 const REPOSITORY_KEYS = ['name', 'id', 'defaultBranch'];
-const SOURCE_KEYS = ['tag', 'commit', 'signed', 'signerFingerprint'];
+const SOURCE_KEYS = ['tag', 'tagObject', 'commit', 'signed', 'signerFingerprint'];
 const PACKAGE_KEYS = ['name', 'version', 'access', 'distTag'];
 const TARBALL_KEYS = ['filename', 'bytes', 'sha256', 'sha512', 'integrity'];
 const RUN_KEYS = ['id', 'attempt'];
@@ -92,6 +92,7 @@ function checkSource(
     const fields = nested(receipt, '', 'source', SOURCE_KEYS, failures);
     if (fields === null) return;
     const tag = checkPattern(fields, 'source', 'tag', patterns.releaseTag, descriptions.tag, failures);
+    checkPattern(fields, 'source', 'tagObject', patterns.commit, descriptions.commit, failures);
     checkPattern(fields, 'source', 'commit', patterns.commit, descriptions.commit, failures);
     const signed = checkBoolean(fields, 'source', 'signed', failures);
     checkFingerprint(fields, signed, failures);

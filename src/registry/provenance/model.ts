@@ -11,10 +11,15 @@ export interface ExpectedProvenance {
     packageName: string;
     packageVersion: string;
     repository: string;
+    repositoryId: number;
     workflowPath: string;
+    builderWorkflow: string;
+    builderSha: string;
     tagRef: string;
+    sourceCommit: string;
     tarballSha512: string;
-    runId?: number;
+    runId: number;
+    runAttempt: number;
 }
 
 export interface ProvenanceBundleInput {

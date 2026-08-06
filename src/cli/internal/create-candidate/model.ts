@@ -9,6 +9,7 @@ export const CREATE_CANDIDATE_FLAGS = [
     'output',
     'profile',
     'tag',
+    'tag-object',
     'repository',
     'repository-id',
     'default-branch',

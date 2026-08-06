@@ -1,13 +1,11 @@
 import { execFileSync } from 'node:child_process';
 
 import { SALLYPORT_WORKFLOW_SHA } from '../../src/cli/pins.ts';
-
-const RELEASE_LAYER_FILES = new Set([
-    '.github/workflows/sallyport.yml',
-    'package-lock.json',
-    'package.json',
-    'src/cli/pins.ts',
-]);
+import {
+    releaseLayerFailure,
+    releaseNoteFailure,
+    SEMANTIC_RELEASE_FILES,
+} from './protocol-pin-policy.mts';
 
 function git(args: readonly string[]): string {
     return execFileSync('git', [...args], {
@@ -17,9 +15,12 @@ function git(args: readonly string[]): string {
     }).trim();
 }
 
-function isReleaseLayerFile(file: string): boolean {
-    return RELEASE_LAYER_FILES.has(file)
-        || /^docs\/releases\/v[^/]+\.md$/u.test(file);
+function content(revision: string, file: string): string {
+    return execFileSync('git', ['show', `${revision}:${file}`], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
 }
 
 try {
@@ -38,14 +39,45 @@ try {
     );
 }
 
-const changed = git(['diff', '--name-only', `${SALLYPORT_WORKFLOW_SHA}..HEAD`])
+const changed = git([
+    'diff', '--name-status', '--no-renames', `${SALLYPORT_WORKFLOW_SHA}..HEAD`,
+])
     .split('\n')
-    .filter((file) => file !== '');
-const runtimeChanges = changed.filter((file) => !isReleaseLayerFile(file));
-if (runtimeChanges.length > 0) {
+    .filter((line) => line !== '')
+    .map((line) => {
+        const [status = '', file = ''] = line.split('\t');
+        return { status, file };
+    });
+const headPackage = JSON.parse(content('HEAD', 'package.json')) as { version?: unknown };
+if (typeof headPackage.version !== 'string' || headPackage.version === '') {
+    throw new Error('HEAD package.json must declare a release version.');
+}
+const failures: string[] = [];
+for (const change of changed) {
+    if (SEMANTIC_RELEASE_FILES.has(change.file)) {
+        if (change.status !== 'M') {
+            failures.push(`${change.file} must exist at both the checkpoint and HEAD.`);
+            continue;
+        }
+        const failure = releaseLayerFailure(
+            change.file,
+            content(SALLYPORT_WORKFLOW_SHA, change.file),
+            content('HEAD', change.file),
+        );
+        if (failure !== null) failures.push(failure);
+        continue;
+    }
+    if (/^docs\/releases\/v[^/]+\.md$/u.test(change.file)) {
+        const failure = releaseNoteFailure(change.status, change.file, headPackage.version);
+        if (failure !== null) failures.push(failure);
+        continue;
+    }
+    failures.push(`${change.file} is outside the release layer.`);
+}
+if (failures.length > 0) {
     throw new Error([
-        `Protocol pin ${SALLYPORT_WORKFLOW_SHA} predates release runtime changes:`,
-        ...runtimeChanges.map((file) => `- ${file}`),
+        `Protocol pin ${SALLYPORT_WORKFLOW_SHA} does not cover the complete release implementation:`,
+        ...failures.map((failure) => `- ${failure}`),
         'Create a full implementation checkpoint, then update only the release layer to pin it.',
     ].join('\n'));
 }

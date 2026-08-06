@@ -59,6 +59,7 @@ async function createCandidate(overrides: Partial<Record<string, string>> = {}):
         '--output': outputDir,
         '--profile': 'standard',
         '--tag': `v${consumer.version}`,
+        '--tag-object': consumer.commit,
         '--repository': 'zsumz/fake',
         '--repository-id': REPOSITORY_ID,
         '--default-branch': 'main',
@@ -210,7 +211,13 @@ describe('internal create-candidate', () => {
                 sha: FIXTURE_SHA,
             },
             repository: { name: 'zsumz/fake', id: 1286348597, defaultBranch: 'main' },
-            source: { tag: 'v1.2.3', commit: consumer.commit, signed: false, signerFingerprint: null },
+            source: {
+                tag: 'v1.2.3',
+                tagObject: consumer.commit,
+                commit: consumer.commit,
+                signed: false,
+                signerFingerprint: null,
+            },
             package: { name: consumer.name, version: consumer.version, access: 'public', distTag: 'latest' },
             tarball: { filename: 'package.tgz', sha256: outputs.sha256 },
             run: { id: 987654321, attempt: 1 },
@@ -255,6 +262,7 @@ describe('internal create-candidate', () => {
             '--output', alphaOut,
             '--profile', 'standard',
             '--tag', 'v3.0.0-rc.1',
+            '--tag-object', alpha.commit,
             '--repository', 'zsumz/fake',
             '--repository-id', REPOSITORY_ID,
             '--default-branch', 'main',
@@ -286,6 +294,7 @@ describe('internal create-candidate', () => {
         };
         expect(receipt.source).toEqual({
             tag: 'v1.2.3',
+            tagObject: consumer.commit,
             commit: consumer.commit,
             signed: true,
             signerFingerprint: 'B58439871CD2A7275B20CC19EC8E4D26598A0373',

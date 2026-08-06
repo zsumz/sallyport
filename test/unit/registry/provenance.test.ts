@@ -9,18 +9,26 @@ import {
     type CommandRunner,
     type ExpectedProvenance,
 } from '../../../src/registry/provenance.ts';
+import { certificateRawBytes } from './certificate-fixture.ts';
 
 const TARBALL_SHA512 = 'e'.repeat(128);
+const BUILDER_SHA = 'a'.repeat(40);
+const SOURCE_COMMIT = 'b'.repeat(40);
 
 function expected(): ExpectedProvenance {
     return {
         packageName: 'demo',
         packageVersion: '1.2.3',
         repository: 'zsumz/demo',
+        repositoryId: 123456,
         workflowPath: '.github/workflows/sallyport.yml',
+        builderWorkflow: 'zsumz/sallyport/.github/workflows/stage.yml',
+        builderSha: BUILDER_SHA,
         tagRef: 'refs/tags/v1.2.3',
+        sourceCommit: SOURCE_COMMIT,
         tarballSha512: TARBALL_SHA512,
         runId: 42,
+        runAttempt: 1,
     };
 }
 
@@ -76,10 +84,19 @@ function statementV02(): Record<string, unknown> {
     };
 }
 
-function bundleFor(statement: unknown, options: { certificate?: boolean } = {}): unknown {
+function bundleFor(
+    statement: unknown,
+    options: { certificate?: boolean; certificateOverrides?: Readonly<Record<string, string>> } = {},
+): unknown {
     const material = options.certificate === false
         ? {}
-        : { x509CertificateChain: { certificates: [{ rawBytes: 'Zm9vYmFy' }] } };
+        : {
+            x509CertificateChain: {
+                certificates: [{
+                    rawBytes: certificateRawBytes(expected(), options.certificateOverrides),
+                }],
+            },
+        };
     return {
         mediaType: 'application/vnd.dev.sigstore.bundle+json;version=0.1',
         verificationMaterial: material,
@@ -142,6 +159,49 @@ describe('verifyProvenanceBundle', () => {
             bundle: bundleFor(statementV1()),
             expected: { ...expected(), tagRef: 'v1.2.3' },
         })).toStrictEqual([]);
+    });
+
+    it('rejects a valid Fulcio certificate from an attacker workflow', () => {
+        const attacker = 'https://github.com/attacker/tools/.github/workflows/stage.yml@'
+            + BUILDER_SHA;
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statementV1(), {
+                certificateOverrides: {
+                    san: attacker,
+                    '1.3.6.1.4.1.57264.1.9': attacker,
+                },
+            }),
+            expected: expected(),
+        });
+        expect(failures).toContain(
+            `Provenance certificate SAN ${attacker} does not match `
+            + `https://github.com/zsumz/sallyport/.github/workflows/stage.yml@${BUILDER_SHA}.`,
+        );
+        expect(failures.some((failure) => failure.includes('build signer URI'))).toBe(true);
+    });
+
+    it.each([
+        ['1.3.6.1.4.1.57264.1.8', 'OIDC issuer'],
+        ['1.3.6.1.4.1.57264.1.9', 'build signer URI'],
+        ['1.3.6.1.4.1.57264.1.10', 'build signer digest'],
+        ['1.3.6.1.4.1.57264.1.11', 'runner environment'],
+        ['1.3.6.1.4.1.57264.1.12', 'source repository URI'],
+        ['1.3.6.1.4.1.57264.1.13', 'source repository digest'],
+        ['1.3.6.1.4.1.57264.1.14', 'source repository ref'],
+        ['1.3.6.1.4.1.57264.1.15', 'source repository ID'],
+        ['1.3.6.1.4.1.57264.1.18', 'build config URI'],
+        ['1.3.6.1.4.1.57264.1.19', 'build config digest'],
+        ['1.3.6.1.4.1.57264.1.20', 'build trigger'],
+        ['1.3.6.1.4.1.57264.1.21', 'run invocation URI'],
+    ])('rejects a certificate with the wrong %s claim', (oid, label) => {
+        const failures = verifyProvenanceBundle({
+            bundle: bundleFor(statementV1(), {
+                certificateOverrides: { [oid]: 'attacker-controlled' },
+            }),
+            expected: expected(),
+        });
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toContain(`certificate ${label}`);
     });
 
     it('rejects a different source repository', () => {
@@ -219,7 +279,7 @@ describe('verifyProvenanceBundle', () => {
             expected: expected(),
         });
         expect(failures).toStrictEqual([
-            'attestation format not recognized: the provenance bundle carries no signing certificate.',
+            'attestation format not recognized: the provenance bundle carries no unambiguous signing certificate.',
         ]);
     });
 
@@ -228,23 +288,15 @@ describe('verifyProvenanceBundle', () => {
             bundle: bundleFor(statementV1()),
             expected: { ...expected(), runId: 99 },
         });
-        expect(failures).toHaveLength(1);
-        expect(failures[0]).toContain('does not identify run 99');
-    });
-
-    it('skips the run check when no run id is expected', () => {
-        const { runId, ...withoutRun } = expected();
-        expect(runId).toBe(42);
-        expect(verifyProvenanceBundle({
-            bundle: bundleFor(statementV1()),
-            expected: withoutRun,
-        })).toStrictEqual([]);
+        expect(failures).toHaveLength(2);
+        expect(failures.some((failure) => failure.includes('run invocation URI'))).toBe(true);
+        expect(failures.some((failure) => failure.includes('does not identify run 99'))).toBe(true);
     });
 
     it('reports an unrecognized format instead of crashing', () => {
         expect(verifyProvenanceBundle({ bundle: null, expected: expected() }))
             .toStrictEqual([
-                'attestation format not recognized: the provenance bundle carries no signing certificate.',
+                'attestation format not recognized: the provenance bundle carries no unambiguous signing certificate.',
                 'attestation format not recognized: the provenance payload could not be decoded for demo@1.2.3.',
             ]);
     });
@@ -257,9 +309,9 @@ describe('verifyProvenanceBundle', () => {
             },
             expected: expected(),
         });
-        expect(failures).toStrictEqual([
-            'attestation format not recognized: the provenance payload could not be decoded for demo@1.2.3.',
-        ]);
+        expect(failures).toHaveLength(2);
+        expect(failures[0]).toContain('provenance signing certificate is malformed');
+        expect(failures[1]).toContain('provenance payload could not be decoded');
     });
 
     it('reports a statement without a build definition', () => {

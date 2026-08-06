@@ -232,6 +232,7 @@ jobs:
           gpg --batch --import etc/release-signing-key.asc
 
       - name: Reinspect source without package code
+        id: source
         env:
           GNUPGHOME: ${{ runner.temp }}/sallyport-gnupg
           SALLYPORT_PROFILE: ${{ inputs.profile }}
@@ -259,6 +260,7 @@ jobs:
           SALLYPORT_TARBALL: ${{ runner.temp }}/sallyport-out/package.tgz
           SALLYPORT_PROFILE: ${{ inputs.profile }}
           SALLYPORT_TAG: ${{ github.ref_name }}
+          SALLYPORT_TAG_OBJECT: ${{ steps.source.outputs.tag_object }}
           SALLYPORT_COMMIT: ${{ github.sha }}
           SALLYPORT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           SALLYPORT_SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
@@ -278,6 +280,7 @@ jobs:
             --output "$RUNNER_TEMP/sallyport-out"
             --profile "$SALLYPORT_PROFILE"
             --tag "$SALLYPORT_TAG"
+            --tag-object "$SALLYPORT_TAG_OBJECT"
             --repository "$GITHUB_REPOSITORY"
             --repository-id "$GITHUB_REPOSITORY_ID"
             --default-branch "$SALLYPORT_DEFAULT_BRANCH"
@@ -324,14 +327,6 @@ jobs:
           path: consumer
           persist-credentials: false
 
-      - name: Check out sallyport
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          repository: zsumz/sallyport
-          ref: ${{ job.workflow_sha }}
-          path: sallyport
-          persist-credentials: false
-
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -351,21 +346,53 @@ jobs:
             exit 1
           fi
 
-      - name: Download sealed candidate by ID
+      - name: Install consumer dependencies
+        working-directory: consumer
+        run: npm ci
+
+      # Install scripts ran before either the trusted candidate or the smoke
+      # orchestrator existed on this runner.
+      - name: Check out exact sallyport implementation
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zsumz/sallyport
+          ref: ${{ job.workflow_sha }}
+          path: sallyport
+          persist-credentials: false
+
+      - name: Download sealed candidate by ID after dependency installation
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.seal.outputs.candidate_artifact_id }}
           path: ${{ runner.temp }}/candidate
 
-      - name: Read sealed candidate identity
+      - name: Authenticate sealed candidate
         env:
-          SALLYPORT_CANDIDATE: ${{ runner.temp }}/candidate/candidate.json
+          SALLYPORT_CANDIDATE_DIR: ${{ runner.temp }}/candidate
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
+          import { createHash } from 'node:crypto';
           import { appendFileSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
 
-          const receipt = JSON.parse(readFileSync(process.env.SALLYPORT_CANDIDATE, 'utf8'));
+          const directory = process.env.SALLYPORT_CANDIDATE_DIR ?? '';
+          const receipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
           const candidatePackage = receipt?.package;
+          const expected = receipt?.tarball;
+          const tarball = readFileSync(join(directory, 'package.tgz'));
+          const sha256 = createHash('sha256').update(tarball).digest('hex');
+          const sha512 = createHash('sha512').update(tarball).digest('hex');
+          const integrity = `sha512-${createHash('sha512').update(tarball).digest('base64')}`;
+          if (receipt?.schema !== 1 || receipt?.protocol !== 'sallyport/0.1') {
+              throw new Error('candidate.json has an unsupported contract');
+          }
+          if (expected?.filename !== 'package.tgz'
+              || expected?.bytes !== tarball.byteLength
+              || expected?.sha256 !== sha256
+              || expected?.sha512 !== sha512
+              || expected?.integrity !== integrity) {
+              throw new Error('sealed package.tgz does not match candidate.json');
+          }
           const values = {
               SALLYPORT_PACKAGE: candidatePackage?.name,
               SALLYPORT_VERSION: candidatePackage?.version,
@@ -378,10 +405,6 @@ jobs:
               appendFileSync(process.env.GITHUB_ENV ?? '/dev/stdout', `${name}=${value}\n`);
           }
           SALLYPORT_NODE
-
-      - name: Install consumer dependencies
-        working-directory: consumer
-        run: npm ci
 
       - name: Smoke sealed candidate
         env:
@@ -499,6 +522,7 @@ jobs:
           check(Number.isSafeInteger(repository.id) && repository.id > 0, 'repository.id must be a positive integer');
           check(typeof repository.defaultBranch === 'string' && repository.defaultBranch.length > 0, 'repository.defaultBranch must be a nonempty string');
           check(typeof source.tag === 'string' && source.tag.length > 0, 'source.tag must be a nonempty string');
+          check(typeof source.tagObject === 'string' && COMMIT.test(source.tagObject), 'source.tagObject must be a 40-character object SHA');
           check(typeof source.commit === 'string' && COMMIT.test(source.commit), 'source.commit must be a 40-character commit');
           check(typeof source.signed === 'boolean', 'source.signed must be a boolean');
           check(source.signerFingerprint === null || (typeof source.signerFingerprint === 'string' && FINGERPRINT.test(source.signerFingerprint)), 'source.signerFingerprint must be null or 40 uppercase hex characters');

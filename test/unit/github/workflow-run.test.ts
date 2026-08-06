@@ -23,6 +23,7 @@ function makeReceipt(): CandidateReceipt {
         repository: { name: 'zsumz/demo', id: REPOSITORY_ID, defaultBranch: 'main' },
         source: {
             tag: 'v1.2.3',
+            tagObject: 'c'.repeat(40),
             commit: COMMIT,
             signed: true,
             signerFingerprint: 'C'.repeat(40),

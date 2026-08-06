@@ -86,6 +86,7 @@ export async function fetchCandidateCommand(
 
     await effects.writeOutput({
         tag: receipt.source.tag,
+        tag_object: receipt.source.tagObject,
         commit: receipt.source.commit,
         package_name: receipt.package.name,
         package_version: receipt.package.version,

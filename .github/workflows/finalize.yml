@@ -140,6 +140,7 @@ jobs:
             --repository-id "$GITHUB_REPOSITORY_ID"
             --default-branch-ref refs/sallyport/default-branch
             --expected-commit "$SALLYPORT_COMMIT"
+            --expected-tag-object "${{ steps.candidate.outputs.tag_object }}"
             # The version is already public here; only stage requires
             # registry absence.
             --mode finalize
@@ -199,12 +200,6 @@ jobs:
       contents: read
 
     steps:
-      - name: Download sealed bundle by ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.verify_core.outputs.bundle_artifact_id }}
-          path: ${{ runner.temp }}/bundle
-
       - name: Check out exact consumer commit
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -236,7 +231,13 @@ jobs:
         working-directory: consumer
         run: npm ci
 
-      - name: Smoke sealed public bytes
+      - name: Download sealed bundle by ID after dependency installation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.verify_core.outputs.bundle_artifact_id }}
+          path: ${{ runner.temp }}/bundle
+
+      - name: Authenticate and smoke sealed public bytes
         env:
           SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
           SALLYPORT_CONSUMER_DIR: ${{ github.workspace }}/consumer
@@ -244,13 +245,47 @@ jobs:
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
           import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
           import { copyFileSync, readFileSync } from 'node:fs';
           import { join } from 'node:path';
 
           const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
           const receipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
           const tarball = process.env.SALLYPORT_SMOKE_TARBALL ?? '';
-          copyFileSync(join(directory, 'package.tgz'), tarball);
+          const authoritative = join(directory, 'package.tgz');
+          const expected = receipt?.tarball;
+          const digest = (file) => {
+              const bytes = readFileSync(file);
+              return {
+                  bytes: bytes.byteLength,
+                  sha256: createHash('sha256').update(bytes).digest('hex'),
+                  sha512: createHash('sha512').update(bytes).digest('hex'),
+                  integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
+              };
+          };
+          const check = (condition, message) => {
+              if (!condition) throw new Error(message);
+          };
+          const assertExpected = (file, actual) => {
+              check(expected?.filename === 'package.tgz', 'candidate.json names the wrong tarball');
+              check(actual.bytes === expected?.bytes, `${file} byte length does not match candidate.json`);
+              check(actual.sha256 === expected?.sha256, `${file} SHA-256 does not match candidate.json`);
+              check(actual.sha512 === expected?.sha512, `${file} SHA-512 does not match candidate.json`);
+              check(actual.integrity === expected?.integrity, `${file} SRI does not match candidate.json`);
+          };
+          check(receipt?.schema === 1, 'candidate.json schema must be 1');
+          check(receipt?.protocol === 'sallyport/0.1', 'candidate.json protocol is unsupported');
+          for (const [name, value] of Object.entries({
+              package: receipt?.package?.name,
+              version: receipt?.package?.version,
+              distTag: receipt?.package?.distTag,
+          })) {
+              check(typeof value === 'string' && value !== '' && !value.includes('\n'),
+                  `candidate.json has an invalid ${name}`);
+          }
+          assertExpected('authoritative package.tgz', digest(authoritative));
+          copyFileSync(authoritative, tarball);
+          assertExpected('smoke copy', digest(tarball));
           execFileSync('npm', ['run', 'release:smoke'], {
               cwd: process.env.SALLYPORT_CONSUMER_DIR,
               env: {
@@ -262,6 +297,8 @@ jobs:
               },
               stdio: 'inherit',
           });
+          assertExpected('smoke copy after smoke', digest(tarball));
+          assertExpected('authoritative package.tgz after smoke', digest(authoritative));
           SALLYPORT_NODE
 
   # Only this job can write repository contents; it runs no consumer code.
@@ -501,6 +538,7 @@ jobs:
           check(Number.isSafeInteger(receiptRepository.id) && receiptRepository.id > 0, 'candidate.json repository.id must be positive');
           check(typeof receiptRepository.defaultBranch === 'string' && receiptRepository.defaultBranch.length > 0, 'candidate.json repository.defaultBranch must be nonempty');
           check(typeof receiptSource.tag === 'string' && receiptSource.tag.length > 0, 'candidate.json source.tag must be nonempty');
+          check(typeof receiptSource.tagObject === 'string' && COMMIT.test(receiptSource.tagObject), 'candidate.json source.tagObject must be a 40-character object SHA');
           check(typeof receiptSource.commit === 'string' && COMMIT.test(receiptSource.commit), 'candidate.json source.commit must be a 40-character commit');
           check(typeof receiptSource.signed === 'boolean', 'candidate.json source.signed must be boolean');
           check(typeof receiptPackage.name === 'string' && PACKAGE_NAME.test(receiptPackage.name), 'candidate.json package.name must be valid');
@@ -604,6 +642,7 @@ jobs:
 
           const outputs = {
               tag: source.tag,
+              tag_object: receiptSource.tagObject,
               commit: source.commit,
               title: `${releasePackage.name} v${releasePackage.version}`,
               package_name: releasePackage.name,
@@ -620,6 +659,7 @@ jobs:
           SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
           SALLYPORT_REPOSITORY: ${{ github.repository }}
           SALLYPORT_TAG: ${{ steps.bundle.outputs.tag }}
+          SALLYPORT_TAG_OBJECT: ${{ steps.bundle.outputs.tag_object }}
           SALLYPORT_COMMIT: ${{ steps.bundle.outputs.commit }}
           SALLYPORT_TITLE: ${{ steps.bundle.outputs.title }}
         run: |
@@ -638,6 +678,7 @@ jobs:
           const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
           const repository = process.env.SALLYPORT_REPOSITORY ?? '';
           const tag = process.env.SALLYPORT_TAG ?? '';
+          const tagObject = process.env.SALLYPORT_TAG_OBJECT ?? '';
           const commit = process.env.SALLYPORT_COMMIT ?? '';
           const title = process.env.SALLYPORT_TITLE ?? '';
           const notes = readFileSync(join(directory, 'RELEASE_NOTES.md'), 'utf8');
@@ -670,6 +711,9 @@ jobs:
           if (!/^[0-9a-f]{40}$/.test(commit)) {
               fail('The release commit is malformed.');
           }
+          if (!/^[0-9a-f]{40}$/.test(tagObject)) {
+              fail('The release tag object is malformed.');
+          }
 
           const digests = new Map(ASSETS.map((name) => [
               name,
@@ -685,6 +729,9 @@ jobs:
                   fail(`Unable to resolve release tag ${tag}: ${refResult.stderr.trim()}`);
               }
               let object = JSON.parse(refResult.stdout).object;
+              if (object?.sha !== tagObject) {
+                  fail(`Release tag ${tag} no longer references verified object ${tagObject}.`);
+              }
               for (let depth = 0; object?.type === 'tag' && depth < 8; depth += 1) {
                   const tagResult = gh([
                       'api', '-H', 'Accept: application/vnd.github+json',

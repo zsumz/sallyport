@@ -25,9 +25,11 @@ branch, and pinned sallyport implementation again; verifies the source and
 packed manifest; and alone authors `candidate.json`. Package code can choose
 its emitted bytes, but it cannot forge the receipt or trusted context.
 
-`candidate_smoke` then downloads that sealed artifact by ID and runs
-`release:smoke` with no authority. It uploads nothing and exposes no output.
-The staging job waits for its success, so the exact staged bytes were smoked.
+`candidate_smoke` runs dependency scripts before downloading trusted code or
+bytes. It then downloads the sealed artifact by ID, authenticates every tarball
+digest against the receipt, and runs `release:smoke` with no authority. Both the
+smoke copy and authoritative tarball are rehashed afterward. The staging job
+waits for its success, so the exact staged bytes were smoked.
 
 `stage` holds the OIDC credential and runs no package code at all: no caller
 checkout, no sallyport checkout, no `npm ci`, no `npm run`, no local Actions, no
@@ -110,7 +112,10 @@ matches name and version; the registry signature is valid; and an npm
 provenance attestation exists and identifies the expected GitHub repository
 and workflow run. Both cryptographic verification and identity parsing use the
 same `attestationBundles` entry returned by `npm audit signatures`; no second
-registry response can supply a more convenient identity. The public tarball is
+registry response can supply a more convenient identity. Sallyport also parses
+that exact bundle's Fulcio certificate and binds its SAN, issuer, reusable
+workflow and SHA, hosted runner, repository ID/commit/ref, caller workflow,
+trigger, run ID, and attempt to the candidate receipt. The public tarball is
 then smoked again with the consumer's own `release:smoke`.
 
 The convergence retry loop is deliberately narrow. It retries only temporary
@@ -127,7 +132,7 @@ registry, so they need their own integrity story.
 The release job downloads only the clean verifier's immutable bundle ID, then
 independently resolves and downloads the originating sealed-candidate artifact
 by ID. It requires byte equality, rechecks the manifest and hashes, rebinds the
-candidate run and tag target, and publishes draft-first: create the draft, add
+candidate run and exact signed tag object, and publishes draft-first: create the draft, add
 the committed release notes, attach every asset including the notes, then
 publish. Immutable Releases
 fix assets and the tag at publication, which is why the assets must all be

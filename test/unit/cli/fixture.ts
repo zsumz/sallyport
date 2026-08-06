@@ -147,6 +147,11 @@ export function buildCandidate(root: string, options: ConsumerOptions = {}): Can
     const dir = path.join(root, 'candidate');
     mkdirSync(dir, { recursive: true });
     const packed = packOnce({ consumerDir: consumer.dir, outputDir: dir, exec: runCommand });
+    const tagObject = runCommand(
+        'git',
+        ['rev-parse', `refs/tags/v${consumer.version}`],
+        { cwd: consumer.dir, env: gitEnvironment() },
+    ).stdout.trim();
     const tarball = readFileSync(packed.tarballPath);
     const digest = hashTarball(tarball);
     const receipt = buildCandidateReceipt({
@@ -162,6 +167,7 @@ export function buildCandidate(root: string, options: ConsumerOptions = {}): Can
         },
         source: {
             tag: `v${consumer.version}`,
+            tagObject,
             commit: consumer.commit,
             signed: false,
             signerFingerprint: null,

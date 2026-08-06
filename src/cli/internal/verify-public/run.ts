@@ -83,10 +83,15 @@ export async function verifyPublicCommand(
         packageName: receipt.package.name,
         packageVersion: receipt.package.version,
         repository: receipt.repository.name,
+        repositoryId: receipt.repository.id,
         workflowPath: CALLER_WORKFLOW_PATH,
+        builderWorkflow: receipt.sallyport.workflow,
+        builderSha: receipt.sallyport.sha,
         tagRef: receipt.source.tag,
+        sourceCommit: receipt.source.commit,
         tarballSha512: receipt.tarball.sha512,
         runId: receipt.run.id,
+        runAttempt: receipt.run.attempt,
     };
     const provenance = await verifyProvenance(effects, outputDir, receipt, expected);
     const smokeFailures = hasFlag(parsed, 'skip-smoke')

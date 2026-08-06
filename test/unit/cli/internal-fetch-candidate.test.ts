@@ -120,6 +120,7 @@ describe('internal fetch-candidate', () => {
             .toEqual(candidate.receiptBytes);
         expect(harness.outputs).toEqual([{
             tag: `v${candidate.consumer.version}`,
+            tag_object: candidate.receipt.source.tagObject,
             commit: candidate.consumer.commit,
             package_name: candidate.consumer.name,
             package_version: candidate.consumer.version,

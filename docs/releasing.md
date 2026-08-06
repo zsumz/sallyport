@@ -50,9 +50,10 @@ Releases enabled.
    change, then commit that complete implementation checkpoint.
 3. Record that commit's full SHA in `src/cli/pins.ts` and both generated caller
    refs. A commit cannot pin itself.
-4. After the checkpoint, change only the release layer: `package.json`,
-   `package-lock.json`, `src/cli/pins.ts`, `.github/workflows/sallyport.yml`,
-   and `docs/releases/v<version>.md`. CI rejects any other path after the pin.
+4. After the checkpoint, change only the semantic release layer: package and
+   lockfile version fields, the baked checkpoint literal, the two reusable
+   workflow SHAs, and one newly added `docs/releases/v<version>.md`. CI compares
+   normalized checkpoint and release files and rejects every other change.
 5. Update `package.json` and `package-lock.json` to the same version and add
    concise notes at `docs/releases/v<version>.md`.
 6. Run `npm run release:check`. Its protocol-pin gate proves the pinned commit

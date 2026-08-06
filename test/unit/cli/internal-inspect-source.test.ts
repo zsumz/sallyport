@@ -70,11 +70,13 @@ describe('internal inspect-source', () => {
 
         await inspectSourceCommand(args(), harness.effects);
 
-        expect(harness.outputs).toEqual([{
+        expect(harness.outputs).toHaveLength(1);
+        expect(harness.outputs[0]).toMatchObject({
             package_name: consumer.name,
             package_version: consumer.version,
             dist_tag: 'latest',
-        }]);
+        });
+        expect(harness.outputs[0]?.tag_object).toMatch(/^[0-9a-f]{40}$/u);
         expect(harness.summaries.join('')).toContain('| Dist-tag | `latest` |');
         expect(harness.summaries.join('')).toContain('| Mode | `stage` |');
     });
@@ -122,6 +124,15 @@ describe('internal inspect-source', () => {
 
         expect(harness.outputs[0]?.package_version).toBe(consumer.version);
         expect(harness.summaries.join('')).toContain('| Mode | `finalize` |');
+    });
+
+    it('rejects a tag ref that no longer names the recorded object', async () => {
+        const harness = createEffects(root, { registry: failingRegistry() });
+
+        await expect(inspectSourceCommand(args({
+            '--mode': 'finalize',
+            '--expected-tag-object': 'a'.repeat(40),
+        }), harness.effects)).rejects.toThrow(/currently references object/u);
     });
 
     it('accepts the finalize mode through SALLYPORT_MODE', async () => {

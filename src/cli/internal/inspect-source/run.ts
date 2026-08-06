@@ -4,6 +4,7 @@ import { readPackageMetadata, validatePackageContract } from '../../../contract/
 import { releaseNotesPath } from '../../../contract/release.ts';
 import { deriveDistTag, releaseTagForVersion } from '../../../contract/semver.ts';
 import {
+    resolveTagObject,
     verifyTagCommit,
     verifyTagReachableFromBranch,
 } from '../../../contract/signing.ts';
@@ -28,6 +29,7 @@ export async function inspectSourceCommand(
     const repositoryId = requirePositiveInteger(parsed, 'repository-id');
     const defaultBranchRef = requireValue(parsed, 'default-branch-ref');
     const expectedCommit = requireValue(parsed, 'expected-commit');
+    const expectedTagObject = optionalValue(parsed, 'expected-tag-object');
     const fingerprint = requestedFingerprint(optionalValue(parsed, 'signer-fingerprint'));
     const mode = parseMode(optionalValue(parsed, 'mode') ?? effects.env.SALLYPORT_MODE);
 
@@ -80,6 +82,14 @@ export async function inspectSourceCommand(
     if (!commit.ok) {
         failures.push(...commit.failures);
     }
+    const tagObject = resolveTagObject({ tag, cwd: consumerDir, exec: effects.exec });
+    if (tagObject === null) {
+        failures.push(`${tag} must resolve to an exact Git object.`);
+    } else if (expectedTagObject !== undefined && tagObject !== expectedTagObject) {
+        failures.push(
+            `${tag} currently references object ${tagObject}, expected ${expectedTagObject}.`,
+        );
+    }
     const reachable = verifyTagReachableFromBranch({
         tag,
         branch: defaultBranchRef,
@@ -97,6 +107,7 @@ export async function inspectSourceCommand(
         package_name: name,
         package_version: version,
         dist_tag: distTag,
+        tag_object: tagObject ?? '',
     });
     await effects.writeSummary(sourceSummary({
         name,

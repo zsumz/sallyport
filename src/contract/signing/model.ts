@@ -27,6 +27,12 @@ export interface TagCommitRequest {
     exec: CommandRunner;
 }
 
+export interface TagObjectRequest {
+    tag: string;
+    cwd: string;
+    exec: CommandRunner;
+}
+
 export type VerificationResult =
     | { ok: true }
     | { ok: false; failures: string[] };

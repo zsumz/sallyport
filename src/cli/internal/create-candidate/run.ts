@@ -37,6 +37,7 @@ export async function createCandidateCommand(
     const outputDir = path.resolve(requireValue(parsed, 'output'));
     const profile = parseProfile(requireValue(parsed, 'profile'));
     const tag = requireValue(parsed, 'tag');
+    const tagObject = requireCommit(requireValue(parsed, 'tag-object'), 'tag-object');
     const repository = requireValue(parsed, 'repository');
     const repositoryId = requirePositiveInteger(parsed, 'repository-id');
     const defaultBranch = requireValue(parsed, 'default-branch');
@@ -86,7 +87,7 @@ export async function createCandidateCommand(
             sha: sallyportSha,
         },
         repository: { name: repository, id: repositoryId, defaultBranch },
-        source: { tag, commit, signed, signerFingerprint: fingerprint },
+        source: { tag, tagObject, commit, signed, signerFingerprint: fingerprint },
         package: { name, version, distTag: decision.distTag },
         tarball: {
             bytes: digest.bytes,

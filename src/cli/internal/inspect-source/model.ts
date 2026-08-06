@@ -10,6 +10,7 @@ export const INSPECT_SOURCE_FLAGS = [
     'repository-id',
     'default-branch-ref',
     'expected-commit',
+    'expected-tag-object',
     'signer-fingerprint',
     'mode',
 ] as const;

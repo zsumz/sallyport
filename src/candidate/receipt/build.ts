@@ -27,6 +27,7 @@ export function buildCandidateReceipt(parts: CandidateReceiptParts): CandidateRe
         },
         source: {
             tag: parts.source.tag,
+            tagObject: parts.source.tagObject,
             commit: parts.source.commit,
             signed: parts.source.signed,
             signerFingerprint: parts.source.signerFingerprint,

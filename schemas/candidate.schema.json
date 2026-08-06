@@ -68,11 +68,16 @@
       "description": "Tagged source commit the candidate was packed from.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "commit", "signed", "signerFingerprint"],
+      "required": ["tag", "tagObject", "commit", "signed", "signerFingerprint"],
       "properties": {
         "tag": {
           "type": "string",
           "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?$"
+        },
+        "tagObject": {
+          "description": "Exact Git object referenced by the release tag when the candidate was sealed.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
         },
         "commit": {
           "type": "string",
