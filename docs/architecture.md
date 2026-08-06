@@ -48,6 +48,7 @@ The architecture check fails on:
 `npm run validate` runs this gate with type checks, rubric linting, the protocol
 checkpoint guard, the full test suite, and a package dry run. The checkpoint
 guard rejects runtime changes after the SHA baked into `src/cli/pins.ts`;
-only version, lockfile, release notes, the pin, and the generated caller may sit
-above it. `npm run release:check` adds the coverage gate used for release
-qualification.
+the baked pin and the generated caller's two workflow pins are the only changes
+that may sit above it. Version fields, release notes, and every implementation
+change must already be finalized in the checkpoint. `npm run release:check`
+adds the coverage gate used for release qualification.

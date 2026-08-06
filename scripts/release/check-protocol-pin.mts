@@ -2,10 +2,9 @@ import { execFileSync } from 'node:child_process';
 
 import { SALLYPORT_WORKFLOW_SHA } from '../../src/cli/pins.ts';
 import {
+    releaseFileFailure,
     releaseLayerFailure,
-    releaseNoteFailure,
     releaseShaAgreementFailure,
-    SEMANTIC_RELEASE_FILES,
 } from './protocol-pin-policy.mts';
 
 function git(args: readonly string[]): string {
@@ -49,10 +48,6 @@ const changed = git([
         const [status = '', file = ''] = line.split('\t');
         return { status, file };
     });
-const headPackage = JSON.parse(content('HEAD', 'package.json')) as { version?: unknown };
-if (typeof headPackage.version !== 'string' || headPackage.version === '') {
-    throw new Error('HEAD package.json must declare a release version.');
-}
 const failures: string[] = [];
 const agreementFailure = releaseShaAgreementFailure(
     content('HEAD', 'src/cli/pins.ts'),
@@ -61,25 +56,21 @@ const agreementFailure = releaseShaAgreementFailure(
 );
 if (agreementFailure !== null) failures.push(agreementFailure);
 for (const change of changed) {
-    if (SEMANTIC_RELEASE_FILES.has(change.file)) {
-        if (change.status !== 'M') {
-            failures.push(`${change.file} must exist at both the checkpoint and HEAD.`);
-            continue;
-        }
-        const failure = releaseLayerFailure(
-            change.file,
-            content(SALLYPORT_WORKFLOW_SHA, change.file),
-            content('HEAD', change.file),
-        );
-        if (failure !== null) failures.push(failure);
+    const fileFailure = releaseFileFailure(change.file);
+    if (fileFailure !== null) {
+        failures.push(fileFailure);
         continue;
     }
-    if (/^docs\/releases\/v[^/]+\.md$/u.test(change.file)) {
-        const failure = releaseNoteFailure(change.status, change.file, headPackage.version);
-        if (failure !== null) failures.push(failure);
+    if (change.status !== 'M') {
+        failures.push(`${change.file} must exist at both the checkpoint and HEAD.`);
         continue;
     }
-    failures.push(`${change.file} is outside the release layer.`);
+    const layerFailure = releaseLayerFailure(
+        change.file,
+        content(SALLYPORT_WORKFLOW_SHA, change.file),
+        content('HEAD', change.file),
+    );
+    if (layerFailure !== null) failures.push(layerFailure);
 }
 if (failures.length > 0) {
     throw new Error([

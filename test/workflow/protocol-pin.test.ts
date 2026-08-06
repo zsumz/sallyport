@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import {
+    releaseFileFailure,
     releaseLayerFailure,
-    releaseNoteFailure,
     releaseShaAgreementFailure,
 } from '../../scripts/release/protocol-pin-policy.mts';
 
@@ -20,20 +20,13 @@ describe('release implementation checkpoint', () => {
         expect(output).toContain('covers the complete release implementation');
     });
 
-    it('permits only package and lockfile version fields', () => {
-        const packageBefore = JSON.stringify({ version: '1.0.0', scripts: { test: 'vitest' } });
-        const packageAfter = JSON.stringify({ version: '1.0.1', scripts: { test: 'vitest' } });
-        const packageAttack = JSON.stringify({ version: '1.0.1', scripts: { test: 'true' } });
-        expect(releaseLayerFailure('package.json', packageBefore, packageAfter)).toBeNull();
-        expect(releaseLayerFailure('package.json', packageBefore, packageAttack))
-            .toContain('more than its permitted release fields');
-
-        const lockBefore = JSON.stringify({ version: '1.0.0', packages: { '': { version: '1.0.0' }, x: { version: '2.0.0' } } });
-        const lockAfter = JSON.stringify({ version: '1.0.1', packages: { '': { version: '1.0.1' }, x: { version: '2.0.0' } } });
-        const lockAttack = JSON.stringify({ version: '1.0.1', packages: { '': { version: '1.0.1' }, x: { version: '3.0.0' } } });
-        expect(releaseLayerFailure('package-lock.json', lockBefore, lockAfter)).toBeNull();
-        expect(releaseLayerFailure('package-lock.json', lockBefore, lockAttack))
-            .toContain('more than its permitted release fields');
+    it('allows only self-referential pins above the checkpoint', () => {
+        expect(releaseFileFailure('.github/workflows/sallyport.yml')).toBeNull();
+        expect(releaseFileFailure('src/cli/pins.ts')).toBeNull();
+        expect(releaseFileFailure('package.json')).toContain('finalized in the implementation checkpoint');
+        expect(releaseFileFailure('package-lock.json')).toContain('finalized in the implementation checkpoint');
+        expect(releaseFileFailure('docs/releases/v1.2.3.md'))
+            .toContain('finalized in the implementation checkpoint');
     });
 
     it('permits only the exact baked and reusable-workflow SHA literals', () => {
@@ -76,13 +69,5 @@ describe('release implementation checkpoint', () => {
             .toContain('release SHA values must equal the protocol checkpoint');
         expect(releaseShaAgreementFailure(pin(a), caller(b, c), a))
             .toContain('release SHA values must equal the protocol checkpoint');
-    });
-
-    it('allows only a newly added note for the current release version', () => {
-        expect(releaseNoteFailure('A', 'docs/releases/v1.2.3.md', '1.2.3')).toBeNull();
-        expect(releaseNoteFailure('M', 'docs/releases/v1.2.3.md', '1.2.3'))
-            .toContain('must be newly added');
-        expect(releaseNoteFailure('A', 'docs/releases/v9.9.9.md', '1.2.3'))
-            .toContain('is not the current release note');
     });
 });

@@ -46,23 +46,20 @@ Releases enabled.
 ## Prepare
 
 1. Start from a clean, current default branch.
-2. Finish every reusable-workflow, CLI, schema, test, and release-runtime
-   change, then commit that complete implementation checkpoint.
-3. Record that commit's full SHA in `src/cli/pins.ts` and both generated caller
-   refs. A commit cannot pin itself.
-4. After the checkpoint, change only the semantic release layer: package and
-   lockfile version fields, the baked checkpoint literal, the two reusable
-   workflow SHAs, and one newly added `docs/releases/v<version>.md`. CI compares
-   normalized checkpoint and release files and rejects every other change.
-5. Update `package.json` and `package-lock.json` to the same version and add
+2. Set `package.json` and `package-lock.json` to the same version and add
    concise notes at `docs/releases/v<version>.md`.
-6. Run `npm run release:check`. Its protocol-pin gate proves the pinned commit
+3. Finish every reusable-workflow, CLI, schema, test, documentation, and
+   release-runtime change, then commit that complete implementation checkpoint.
+4. Record that commit's full SHA in `src/cli/pins.ts` and both generated caller
+   refs. A commit cannot pin itself, so these three SHA literals are the only
+   changes permitted above the checkpoint. CI rejects every other field or path.
+5. Run `npm run release:check`. Its protocol-pin gate proves the pinned commit
    contains the complete implementation, not merely the last workflow edit.
-7. Run `npx sallyport@alpha check`.
-8. Run `npx sallyport@alpha check --remote` with authenticated GitHub and npm
+6. Run `npx sallyport@alpha check`.
+7. Run `npx sallyport@alpha check --remote` with authenticated GitHub and npm
    CLIs. Resolve every `FAIL`; manually confirm any `UNVERIFIED` npm setting.
-9. Commit as `chore(release): v<version>` with the configured OpenPGP key.
-10. Push and wait for the complete CI matrix.
+8. Commit as `chore(release): v<version>` with the configured OpenPGP key.
+9. Push and wait for the complete CI matrix.
 
 ## Stage
 
