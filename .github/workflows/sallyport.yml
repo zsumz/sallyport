@@ -25,7 +25,7 @@ jobs:
       actions: read
       contents: read
       id-token: write
-    uses: zsumz/sallyport/.github/workflows/stage.yml@229846372a5fef897abeadffd35a92b091ae3415
+    uses: zsumz/sallyport/.github/workflows/stage.yml@d789b857905727328691c2a5b772199fa91b57b1
     with:
       profile: strict
       signer_fingerprint: ${{ vars.SALLYPORT_SIGNER_FINGERPRINT }}
@@ -35,7 +35,7 @@ jobs:
     permissions:
       actions: read
       contents: write
-    uses: zsumz/sallyport/.github/workflows/finalize.yml@229846372a5fef897abeadffd35a92b091ae3415
+    uses: zsumz/sallyport/.github/workflows/finalize.yml@d789b857905727328691c2a5b772199fa91b57b1
     with:
       candidate_run_id: ${{ inputs.candidate_run_id }}
       profile: strict
