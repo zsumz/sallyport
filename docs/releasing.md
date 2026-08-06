@@ -76,8 +76,9 @@ git push origin v<version>
 The caller's `prepare` job runs the package gate and emits only a tarball. A
 fresh `seal` job rebinds the tag, commit, signer, branch, manifest, and digests
 before authoring the receipt. An output-free job smokes that sealed artifact by
-ID. Only then may the OIDC job download the seal job's artifact ID and stage it.
-It cannot publish directly.
+ID after installing dependencies with lifecycle scripts disabled. Only then may
+the OIDC job download the seal job's artifact ID and stage it. It cannot publish
+directly.
 
 Note the stage ID and the candidate run ID from the staging summary.
 
@@ -105,10 +106,11 @@ Run the finalizer with the candidate run ID from the staging summary:
 gh workflow run sallyport.yml -f candidate_run_id=<run-id>
 ```
 
-It requires the derived dist-tag to point at that version, downloads and
-smokes the public registry tarball, verifies byte equality, registry
-signature, and provenance attestation, then creates the immutable GitHub
-Release draft-first from the existing signed tag and committed release notes.
+It requires the derived dist-tag to point at that version, installs smoke
+dependencies with lifecycle scripts disabled, downloads and smokes the public
+registry tarball, verifies byte equality, registry signature, and provenance
+attestation, then creates the immutable GitHub Release draft-first from the
+existing signed tag and committed release notes.
 
 Confirm the npm version, dist-tag, integrity, provenance, GitHub Release, and
 remote tag before announcing completion.

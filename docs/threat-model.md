@@ -25,11 +25,13 @@ branch, and pinned sallyport implementation again; verifies the source and
 packed manifest; and alone authors `candidate.json`. Package code can choose
 its emitted bytes, but it cannot forge the receipt or trusted context.
 
-`candidate_smoke` runs dependency scripts before downloading trusted code or
-bytes. It then downloads the sealed artifact by ID, authenticates every tarball
-digest against the receipt, and runs `release:smoke` with no authority. Both the
-smoke copy and authoritative tarball are rehashed afterward. The staging job
-waits for its success, so the exact staged bytes were smoked.
+`candidate_smoke` installs dependencies with `npm ci --ignore-scripts`, so no
+install hook can poison later step environments, replace executables, or leave
+a detached mutator. It then checks out trusted sallyport code, downloads the
+sealed artifact by ID, authenticates every tarball digest against the receipt,
+and runs only the signed repository's explicit `release:smoke` contract. Both
+the smoke copy and authoritative tarball are rehashed afterward. The staging
+job waits for its success, so the exact staged bytes were smoked.
 
 `stage` holds the OIDC credential and runs no package code at all: no caller
 checkout, no sallyport checkout, no `npm ci`, no `npm run`, no local Actions, no
@@ -39,10 +41,11 @@ verifies the candidate digest, and invokes `npm stage publish` from validated
 values.
 
 The same split covers GitHub Release authority. `verify_core` seals the bundle
-on a clean runner before package code. `public_smoke` runs package code but
-exports no artifact or metadata. `release` waits for both, downloads only the
-clean bundle's artifact ID, independently rebinds it to GitHub context, and
-runs no package code.
+on a clean runner before package code. `public_smoke` also installs with
+lifecycle scripts disabled, then runs only `release:smoke` and exports no
+artifact or metadata. `release` waits for both, downloads only the clean
+bundle's artifact ID, independently rebinds it to GitHub context, and runs no
+package code.
 
 Invariants 2, 3, and 8.
 

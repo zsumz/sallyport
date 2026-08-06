@@ -4,6 +4,7 @@ import { SALLYPORT_WORKFLOW_SHA } from '../../src/cli/pins.ts';
 import {
     releaseLayerFailure,
     releaseNoteFailure,
+    releaseShaAgreementFailure,
     SEMANTIC_RELEASE_FILES,
 } from './protocol-pin-policy.mts';
 
@@ -53,6 +54,12 @@ if (typeof headPackage.version !== 'string' || headPackage.version === '') {
     throw new Error('HEAD package.json must declare a release version.');
 }
 const failures: string[] = [];
+const agreementFailure = releaseShaAgreementFailure(
+    content('HEAD', 'src/cli/pins.ts'),
+    content('HEAD', '.github/workflows/sallyport.yml'),
+    SALLYPORT_WORKFLOW_SHA,
+);
+if (agreementFailure !== null) failures.push(agreementFailure);
 for (const change of changed) {
     if (SEMANTIC_RELEASE_FILES.has(change.file)) {
         if (change.status !== 'M') {

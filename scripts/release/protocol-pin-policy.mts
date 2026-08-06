@@ -1,7 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 
-const PIN_LITERAL = /export const SALLYPORT_WORKFLOW_SHA = '[0-9a-f]{40}';/gu;
-const WORKFLOW_PIN = /(uses:\s*zsumz\/sallyport\/\.github\/workflows\/(stage|finalize)\.yml)@[0-9a-f]{40}/gu;
+const COMMIT = /^[0-9a-f]{40}$/u;
+const PIN_LITERAL = /export const SALLYPORT_WORKFLOW_SHA = '([0-9a-f]{40})';/gu;
+const WORKFLOW_PIN = /(uses:\s*zsumz\/sallyport\/\.github\/workflows\/(stage|finalize)\.yml)@([0-9a-f]{40})/gu;
 
 export const SEMANTIC_RELEASE_FILES = new Set([
     '.github/workflows/sallyport.yml',
@@ -27,6 +28,33 @@ export function releaseLayerFailure(
     }
 }
 
+export function releaseShaAgreementFailure(
+    pinSource: string,
+    workflowSource: string,
+    checkpoint: string,
+): string | null {
+    try {
+        if (!COMMIT.test(checkpoint)) {
+            throw new Error('checkpoint must be a full lowercase commit SHA.');
+        }
+        const packaged = extractPinLiteral(pinSource);
+        const workflows = extractWorkflowPins(workflowSource);
+        if (packaged === checkpoint
+            && workflows.stage === checkpoint
+            && workflows.finalize === checkpoint) {
+            return null;
+        }
+        return [
+            'release SHA values must equal the protocol checkpoint',
+            `${checkpoint}: SALLYPORT_WORKFLOW_SHA=${packaged},`,
+            `stage.yml=${workflows.stage}, finalize.yml=${workflows.finalize}.`,
+        ].join(' ');
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `release SHA values cannot be compared: ${message}`;
+    }
+}
+
 export function releaseNoteFailure(
     status: string,
     file: string,
@@ -48,6 +76,7 @@ function normalize(file: string, source: string): unknown {
         case 'package-lock.json':
             return normalizeLockfile(source);
         case 'src/cli/pins.ts':
+            extractPinLiteral(source);
             return replaceExactly(
                 source,
                 PIN_LITERAL,
@@ -84,15 +113,41 @@ function normalizeLockfile(source: string): unknown {
 }
 
 function replaceWorkflowPins(source: string): string {
-    const kinds: string[] = [];
-    const normalized = source.replace(WORKFLOW_PIN, (_match, prefix: string, kind: string) => {
-        kinds.push(kind);
-        return `${prefix}@<release-sha>`;
-    });
-    if (kinds.length !== 2 || [...kinds].sort().join(',') !== 'finalize,stage') {
-        throw new Error('caller workflow must contain exactly one stage pin and one finalize pin.');
+    extractWorkflowPins(source);
+    return source.replace(WORKFLOW_PIN, (_match, prefix: string) =>
+        `${prefix}@<release-sha>`);
+}
+
+function extractPinLiteral(source: string): string {
+    const matches = [...source.matchAll(PIN_LITERAL)];
+    const value = matches[0]?.[1];
+    if (matches.length !== 1 || value === undefined) {
+        throw new Error(
+            `packaged CLI must contain exactly one workflow SHA; found ${String(matches.length)}.`,
+        );
     }
-    return normalized;
+    return value;
+}
+
+function extractWorkflowPins(source: string): { stage: string; finalize: string } {
+    const matches = [...source.matchAll(WORKFLOW_PIN)];
+    const pins: Partial<Record<'stage' | 'finalize', string>> = {};
+    for (const match of matches) {
+        const kind = match[2];
+        const sha = match[3];
+        if (kind !== 'stage' && kind !== 'finalize' || sha === undefined || pins[kind] !== undefined) {
+            throw new Error(
+                'caller workflow must contain exactly one stage pin and one finalize pin.',
+            );
+        }
+        pins[kind] = sha;
+    }
+    if (matches.length !== 2 || pins.stage === undefined || pins.finalize === undefined) {
+        throw new Error(
+            'caller workflow must contain exactly one stage pin and one finalize pin.',
+        );
+    }
+    return { stage: pins.stage, finalize: pins.finalize };
 }
 
 function replaceExactly(

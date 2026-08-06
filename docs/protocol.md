@@ -322,13 +322,14 @@ artifact ID is handed to `candidate_smoke` and `stage`.
 
 Permissions: `actions: read`, `contents: read`. No OIDC or write access.
 
-This job checks out the exact consumer commit and installs dependencies before
-trusted bytes or trusted code exist on the runner. It then checks out the exact
-sallyport commit, downloads the sealed candidate by immutable artifact ID, and
-validates its byte length, SHA-256, SHA-512, and SRI against `candidate.json`.
-`release:smoke` runs against a copy; sallyport hashes the copy and authoritative
-tarball again afterward. The job uploads nothing and exposes no output; only
-its success is consumed by `stage`.
+This job checks out the exact consumer commit and installs dependencies with
+`npm ci --ignore-scripts`; no package lifecycle code runs before the trusted
+orchestrator exists. It then checks out the exact sallyport commit, downloads
+the sealed candidate by immutable artifact ID, and validates its byte length,
+SHA-256, SHA-512, and SRI against `candidate.json`. `release:smoke` runs against
+a copy; sallyport hashes the copy and authoritative tarball again afterward.
+The job uploads nothing and exposes no output; only its success is consumed by
+`stage`.
 
 ### Job 4: `stage`
 
@@ -443,11 +444,12 @@ listed in `SHA256SUMS`; the immutable bundle artifact ID is a job output.
 
 Permissions: `actions: read`, `contents: read`. No OIDC or write access.
 
-This separate job installs the exact consumer's dependencies first, then
-downloads the sealed bundle by artifact ID. Embedded workflow code validates
-`candidate.json` and every tarball digest, runs `release:smoke` against a copy,
-and rehashes both the copy and authoritative tarball afterward. It uploads no
-artifact and exposes no output; the release job consumes only its success.
+This separate job installs the exact consumer's dependencies with
+`npm ci --ignore-scripts`, then downloads the sealed bundle by artifact ID.
+Embedded workflow code validates `candidate.json` and every tarball digest,
+runs only the explicit `release:smoke` script against a copy, and rehashes both
+the copy and authoritative tarball afterward. It uploads no artifact and
+exposes no output; the release job consumes only its success.
 
 ### Job 3: `release`
 
@@ -497,9 +499,10 @@ overwrite a conflicting GitHub Release. See [recovery](./recovery.md).
 
 1. No persistent npm publishing token — CI uses only short-lived OIDC
    credentials.
-2. Package code never runs with npm publishing authority. `prepare` and
-   `candidate_smoke` run package code without OIDC; `stage` has OIDC and runs
-   no package code.
+2. Package code never runs with npm publishing authority. `prepare` and the
+   explicit `candidate_smoke` contract run without OIDC; smoke dependency
+   installs disable lifecycle scripts. `stage` has OIDC and runs no package
+   code.
 3. Package code never runs with GitHub Release write authority. `public_smoke`
    runs package code and exports no trusted output; `release` can write and
    runs no package code.
@@ -508,8 +511,9 @@ overwrite a conflicting GitHub Release. See [recovery](./recovery.md).
 5. CI may stage but may never publish directly; the trusted publisher is
    restricted to `--allow-stage-publish`.
 6. Human approval is unavoidable, and requires 2FA.
-7. Central code is immutable per consumer, pinned by the full implementation
-   checkpoint SHA; CI rejects runtime changes above that checkpoint.
+7. Central code is immutable per consumer. The packaged checkpoint constant
+   and both reusable-workflow pins must equal the same full SHA; CI rejects
+   runtime changes above it.
 8. Release metadata is derived, never supplied by workflow inputs.
 9. External actions are immutable, pinned by full commit SHA.
 10. Public bytes are independently verified before any GitHub Release is

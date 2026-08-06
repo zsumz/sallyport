@@ -85,7 +85,11 @@ describe('adversarial release model', () => {
             .with?.['artifact-ids'])
             .toBe('${{ needs.seal.outputs.candidate_artifact_id }}');
         expect(scripts('stage.yml', 'candidate_smoke')).toContain('internal smoke');
-        const install = stepIndex('stage.yml', 'candidate_smoke', (step) => step.run === 'npm ci');
+        const install = stepIndex(
+            'stage.yml',
+            'candidate_smoke',
+            (step) => step.run === 'npm ci --ignore-scripts',
+        );
         const checkout = stepIndex(
             'stage.yml',
             'candidate_smoke',
@@ -97,6 +101,10 @@ describe('adversarial release model', () => {
             (step) => (step.uses ?? '').includes('actions/download-artifact'),
         );
         expect(install).toBeGreaterThan(-1);
+        expect((smoke.steps ?? [])
+            .map((step) => step.run)
+            .filter((run) => run?.startsWith('npm ci')))
+            .toStrictEqual(['npm ci --ignore-scripts']);
         expect(checkout).toBeGreaterThan(install);
         expect(download).toBeGreaterThan(checkout);
         const smokeScripts = scripts('stage.yml', 'candidate_smoke');
@@ -117,13 +125,21 @@ describe('adversarial release model', () => {
             .toBe(false);
         expect(smoke.outputs).toBeUndefined();
         expect(releaseJob.needs).toEqual(['verify_core', 'public_smoke']);
-        const install = stepIndex('finalize.yml', 'public_smoke', (step) => step.run === 'npm ci');
+        const install = stepIndex(
+            'finalize.yml',
+            'public_smoke',
+            (step) => step.run === 'npm ci --ignore-scripts',
+        );
         const download = stepIndex(
             'finalize.yml',
             'public_smoke',
             (step) => (step.uses ?? '').includes('actions/download-artifact'),
         );
         expect(download).toBeGreaterThan(install);
+        expect((smoke.steps ?? [])
+            .map((step) => step.run)
+            .filter((run) => run?.startsWith('npm ci')))
+            .toStrictEqual(['npm ci --ignore-scripts']);
         const smokeScripts = scripts('finalize.yml', 'public_smoke');
         expect(smokeScripts).toContain('smoke copy after smoke');
         expect(smokeScripts).toContain('authoritative package.tgz after smoke');

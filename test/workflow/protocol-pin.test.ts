@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
     releaseLayerFailure,
     releaseNoteFailure,
+    releaseShaAgreementFailure,
 } from '../../scripts/release/protocol-pin-policy.mts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -57,6 +58,24 @@ describe('release implementation checkpoint', () => {
         expect(releaseLayerFailure(
             '.github/workflows/sallyport.yml', caller('a'.repeat(40)), caller('b'.repeat(40), 'write'),
         )).toContain('more than its permitted release fields');
+    });
+
+    it('requires the packaged and reusable-workflow SHAs to equal the checkpoint', () => {
+        const a = 'a'.repeat(40);
+        const b = 'b'.repeat(40);
+        const c = 'c'.repeat(40);
+        const pin = (sha: string): string =>
+            `export const SALLYPORT_WORKFLOW_SHA = '${sha}';\n`;
+        const caller = (stage: string, finalize: string): string => [
+            `uses: zsumz/sallyport/.github/workflows/stage.yml@${stage}`,
+            `uses: zsumz/sallyport/.github/workflows/finalize.yml@${finalize}`,
+        ].join('\n');
+
+        expect(releaseShaAgreementFailure(pin(a), caller(a, a), a)).toBeNull();
+        expect(releaseShaAgreementFailure(pin(a), caller(b, b), a))
+            .toContain('release SHA values must equal the protocol checkpoint');
+        expect(releaseShaAgreementFailure(pin(a), caller(b, c), a))
+            .toContain('release SHA values must equal the protocol checkpoint');
     });
 
     it('allows only a newly added note for the current release version', () => {
