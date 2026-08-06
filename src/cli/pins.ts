@@ -2,7 +2,7 @@
 // A commit cannot reference its own SHA; see docs/releasing.md.
 export const PLACEHOLDER_WORKFLOW_SHA = '0000000000000000000000000000000000000000';
 
-export const SALLYPORT_WORKFLOW_SHA = 'd3e643d8671471d0f97aaf2d877e81f348d0727f';
+export const SALLYPORT_WORKFLOW_SHA = '0c796280163ad3c9c510199bc75e8ff44fc5039f';
 
 const COMMIT_PATTERN = /^[0-9a-fA-F]{40}$/u;
 
