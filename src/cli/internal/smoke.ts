@@ -6,9 +6,10 @@ import {
     verifyTarballUnchanged,
     type TarballDigest,
 } from '../../candidate/inspect.ts';
-import { parseArgv, requireValue } from '../args.ts';
+import { optionalValue, parseArgv, requireValue } from '../args.ts';
 import { ensureDirectory, errorMessage, failure } from '../support.ts';
 import type { CliEffects } from './effects.ts';
+import { smokeCandidateDirectory } from './smoke-candidate.ts';
 
 export const SMOKE_TARBALL_FILENAME = 'smoke-package.tgz';
 export const SMOKE_DIRECTORY = 'sallyport-smoke';
@@ -73,9 +74,19 @@ export async function smokeCommand(
     effects: CliEffects,
 ): Promise<void> {
     const parsed = parseArgv(argv, {
-        strings: ['consumer', 'tarball', 'package', 'version', 'dist-tag'],
+        strings: ['consumer', 'candidate-dir', 'tarball', 'package', 'version', 'dist-tag'],
     });
     const consumerDir = path.resolve(requireValue(parsed, 'consumer'));
+    const candidateDir = optionalValue(parsed, 'candidate-dir');
+    if (candidateDir !== undefined) {
+        await smokeCandidateDirectory({
+            candidateDir: path.resolve(candidateDir),
+            consumerDir,
+            effects,
+            runSingle: runReleaseSmoke,
+        });
+        return;
+    }
     const tarballPath = path.resolve(requireValue(parsed, 'tarball'));
     const packageName = requireValue(parsed, 'package');
     const version = requireValue(parsed, 'version');

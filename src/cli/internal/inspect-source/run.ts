@@ -1,6 +1,9 @@
 import path from 'node:path';
 
-import { readPackageMetadata, validatePackageContract } from '../../../contract/package.ts';
+import {
+    readReleaseMetadata,
+    validateReleaseContract,
+} from '../../../contract/package.ts';
 import { releaseNotesPath } from '../../../contract/release.ts';
 import { deriveDistTag, releaseTagForVersion } from '../../../contract/semver.ts';
 import {
@@ -33,13 +36,11 @@ export async function inspectSourceCommand(
     const fingerprint = requestedFingerprint(optionalValue(parsed, 'signer-fingerprint'));
     const mode = parseMode(optionalValue(parsed, 'mode') ?? effects.env.SALLYPORT_MODE);
 
-    const metadata = await readPackageMetadata(consumerDir);
+    const release = await readReleaseMetadata(consumerDir);
     const failures: string[] = [];
-    const name = metadata.name ?? '';
-    const version = metadata.version ?? '';
-    if (name === '') {
-        failures.push('package.json must declare a name.');
-    }
+    const name = release.root.name ?? '';
+    const version = release.root.version ?? '';
+    if (name === '') failures.push('package.json must declare a name.');
     if (version === '') {
         throw failure('Source inspection failed:', [
             ...failures,
@@ -49,24 +50,33 @@ export async function inspectSourceCommand(
 
     const expectedTag = releaseTagForVersion(version);
     if (tag !== expectedTag) {
-        failures.push(`release tag ${tag} must be ${expectedTag}.`);
+        failures.push('release tag ' + tag + ' must be ' + expectedTag + '.');
     }
     const decision = deriveDistTag(version);
     const distTag = 'distTag' in decision ? decision.distTag : '';
-    if ('error' in decision) {
-        failures.push(decision.error);
-    }
+    if ('error' in decision) failures.push(decision.error);
 
+    const registryVersions: Set<string> = new Set();
+    if (mode === 'stage') {
+        for (const member of release.packages) {
+            if (member.name === undefined || member.version === undefined) continue;
+            const registry = await lookupRegistryVersion(
+                effects,
+                member.name,
+                member.version,
+            );
+            failures.push(...registry.failures);
+            if (registry.present) {
+                registryVersions.add(member.name + '@' + member.version);
+            }
+        }
+    }
     const hasReleaseNotes = await isFile(path.join(consumerDir, releaseNotesPath(version)));
-    const registry = mode === 'stage' && name !== ''
-        ? await lookupRegistryVersion(effects, name, version)
-        : { present: false, failures: [] };
-    failures.push(...registry.failures);
-    failures.push(...validatePackageContract({
-        ...metadata,
+    failures.push(...validateReleaseContract({
+        metadata: release,
         tag,
         expectedRepository: repository,
-        registryHasVersion: registry.present,
+        registryVersions,
         hasReleaseNotes,
     }));
 
@@ -108,6 +118,8 @@ export async function inspectSourceCommand(
         package_version: version,
         dist_tag: distTag,
         tag_object: tagObject ?? '',
+        package_count: String(release.packages.length),
+        release_name: name,
     });
     await effects.writeSummary(sourceSummary({
         name,

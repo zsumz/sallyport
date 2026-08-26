@@ -13,6 +13,7 @@ export interface PackOnceInput {
     consumerDir: string;
     outputDir: string;
     exec: ExecCommand;
+    filename?: string;
 }
 
 export interface PackOnceResult {
@@ -40,7 +41,7 @@ export function packOnce(input: PackOnceInput): PackOnceResult {
         throw new Error(`npm pack did not create ${reportedFilename}.`);
     }
 
-    const tarballPath = path.join(outputDir, CANDIDATE_TARBALL_FILENAME);
+    const tarballPath = path.join(outputDir, input.filename ?? CANDIDATE_TARBALL_FILENAME);
     if (packedPath !== tarballPath) {
         if (statSync(tarballPath, { throwIfNoEntry: false }) !== undefined) {
             throw new Error(`Candidate tarball already exists: ${tarballPath}`);

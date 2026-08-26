@@ -54,7 +54,8 @@ No service, account, daemon, database, npm token, or runtime dependency.
 Your package provides two scripts:
 
 - `release:check` validates the tagged source.
-- `release:smoke` tests the exact tarball in `SALLYPORT_TARBALL`.
+- `release:smoke` tests either one exact tarball in `SALLYPORT_TARBALL` or an
+  ordered package-family manifest in `SALLYPORT_PACKAGES`.
 
 See the [Protocol](./docs/protocol.md#2-the-consumer-repository-contract) for
 the complete contract.
@@ -72,6 +73,7 @@ Approve the npm stage with maintainer 2FA, then finalize its candidate run:
 
 ```sh
 npm stage approve <stage-id>
+# Repeat review and approval for every stage ID shown for a package family.
 gh workflow run sallyport.yml -f candidate_run_id=<run-id>
 ```
 
@@ -81,8 +83,9 @@ gh workflow run sallyport.yml -f candidate_run_id=<run-id>
 
 ## Support
 
-Public, single-package npm repositories on GitHub-hosted Linux runners. Running
-the CLI requires Node `22.18.0` or newer and a root `package-lock.json`. Release
+Public npm repositories on GitHub-hosted Linux runners: either one root package
+or an explicit, ordered workspace family configured with `sallyport.packages`.
+Running the CLI requires Node `22.18.0` or newer and a root `package-lock.json`. Release
 workflows use the exact Node `24.19.0` / npm `11.17.0` toolchain.
 
 ## Development

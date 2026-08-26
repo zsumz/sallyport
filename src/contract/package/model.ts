@@ -14,6 +14,26 @@ export interface PackageMetadata {
     lockRootVersion: string | undefined;
 }
 
+export interface ReleasePackageMetadata extends PackageMetadata {
+    directory: string;
+    repositoryDirectory: string | undefined;
+}
+
+export interface ReleaseMetadata {
+    root: PackageMetadata;
+    packages: readonly ReleasePackageMetadata[];
+    isFamily: boolean;
+    configurationFailures: readonly string[];
+}
+
+export interface ReleaseContractInput {
+    metadata: ReleaseMetadata;
+    tag: string;
+    expectedRepository: string;
+    registryVersions: ReadonlySet<string>;
+    hasReleaseNotes: boolean;
+}
+
 export interface PackageContractInput extends PackageMetadata {
     tag: string;
     expectedRepository: string;

@@ -1,4 +1,7 @@
-import type { PackageMetadata } from '../../contract/package.ts';
+import type {
+    PackageMetadata,
+    ReleaseMetadata,
+} from '../../contract/package.ts';
 import type { CommandRunner } from '../../contract/signing.ts';
 import type { Profile } from '../template.ts';
 
@@ -29,6 +32,7 @@ export interface WorkflowFile {
 
 export interface CheckContext {
     metadata: PackageMetadata | null;
+    releaseMetadata: ReleaseMetadata | null;
     metadataError: string;
     scripts: Record<string, string>;
     remote: string | null;

@@ -173,6 +173,7 @@ describe('extractCandidateArtifact', () => {
     it('extracts exactly package.tgz and candidate.json', () => {
         expect(extractCandidateArtifact(candidateZip())).toStrictEqual({
             tarball: TARBALL,
+            tarballs: new Map([['package.tgz', TARBALL]]),
             receipt: RECEIPT,
         });
     });
@@ -190,7 +191,7 @@ describe('extractCandidateArtifact', () => {
     it('rejects a missing candidate receipt', () => {
         const zip = buildZip([{ name: 'package.tgz', data: TARBALL, method: STORED }]);
         expect(() => extractCandidateArtifact(zip))
-            .toThrow('must contain package.tgz and candidate.json');
+            .toThrow('must contain candidate.json and at least one package tarball');
     });
 
     it('rejects duplicate entries', () => {
@@ -348,6 +349,10 @@ describe('fetchCandidateArtifact', () => {
             runId: 555,
             runAttempt: RUN_ATTEMPT,
             commit: COMMIT,
-        })).resolves.toStrictEqual({ tarball: TARBALL, receipt: RECEIPT });
+        })).resolves.toStrictEqual({
+            tarball: TARBALL,
+            tarballs: new Map([['package.tgz', TARBALL]]),
+            receipt: RECEIPT,
+        });
     });
 });

@@ -152,7 +152,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sallyport-unsealed-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/sallyport-out/package.tgz
+          path: ${{ runner.temp }}/sallyport-out/package*.tgz
           if-no-files-found: error
           retention-days: 1
 
@@ -277,6 +277,7 @@ jobs:
             internal create-candidate
             --consumer "$GITHUB_WORKSPACE/consumer"
             --tarball "$SALLYPORT_TARBALL"
+            --candidate-dir "$RUNNER_TEMP/sallyport-out"
             --output "$RUNNER_TEMP/sallyport-out"
             --profile "$SALLYPORT_PROFILE"
             --tag "$SALLYPORT_TAG"
@@ -303,7 +304,7 @@ jobs:
         with:
           name: sallyport-candidate-${{ github.sha }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/sallyport-out/package.tgz
+            ${{ runner.temp }}/sallyport-out/package*.tgz
             ${{ runner.temp }}/sallyport-out/candidate.json
           if-no-files-found: error
           retention-days: 90
@@ -377,6 +378,9 @@ jobs:
 
           const directory = process.env.SALLYPORT_CANDIDATE_DIR ?? '';
           const receipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
+          if (receipt?.schema === 2 && receipt?.protocol === 'sallyport/0.2') {
+              process.exit(0);
+          }
           const candidatePackage = receipt?.package;
           const expected = receipt?.tarball;
           const tarball = readFileSync(join(directory, 'package.tgz'));
@@ -407,15 +411,10 @@ jobs:
           SALLYPORT_NODE
 
       - name: Smoke sealed candidate
-        env:
-          SALLYPORT_TARBALL: ${{ runner.temp }}/candidate/package.tgz
         run: |
           node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal smoke \
             --consumer "$GITHUB_WORKSPACE/consumer" \
-            --tarball "$SALLYPORT_TARBALL" \
-            --package "$SALLYPORT_PACKAGE" \
-            --version "$SALLYPORT_VERSION" \
-            --dist-tag "$SALLYPORT_DIST_TAG"
+            --candidate-dir "$RUNNER_TEMP/candidate"
 
   # Keep repository code outside the job that can mint an npm credential.
   stage:
@@ -471,7 +470,7 @@ jobs:
         run: |
           node --input-type=module - <<'SALLYPORT_NODE'
           import { createHash } from 'node:crypto';
-          import { appendFileSync, readFileSync } from 'node:fs';
+          import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
 
           const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
@@ -513,6 +512,85 @@ jobs:
           const tarball = section(receipt.tarball);
           const run = section(receipt.run);
 
+          if (receipt.protocol === 'sallyport/0.2') {
+              const family = section(receipt.family);
+              const members = Array.isArray(receipt.packages) ? receipt.packages.map(section) : [];
+              check(receipt.schema === 2, 'family schema must be 2');
+              check(typeof sallyport.version === 'string' && sallyport.version.length > 0, 'sallyport.version must be nonempty');
+              check(sallyport.workflow === 'zsumz/sallyport/.github/workflows/stage.yml', 'sallyport.workflow must name the stage workflow');
+              check(typeof sallyport.sha === 'string' && COMMIT.test(sallyport.sha), 'sallyport.sha must be a commit');
+              check(repository.name === process.env.SALLYPORT_REPOSITORY, 'repository.name must match');
+              check(String(repository.id) === process.env.SALLYPORT_REPOSITORY_ID, 'repository.id must match');
+              check(repository.defaultBranch === process.env.SALLYPORT_DEFAULT_BRANCH, 'default branch must match');
+              check(source.tag === process.env.SALLYPORT_TAG, 'source.tag must match');
+              check(source.commit === process.env.SALLYPORT_COMMIT, 'source.commit must match');
+              check(String(run.id) === process.env.SALLYPORT_RUN_ID, 'run.id must match');
+              check(String(run.attempt) === process.env.SALLYPORT_RUN_ATTEMPT, 'run.attempt must match');
+              check(sallyport.sha === process.env.SALLYPORT_WORKFLOW_SHA, 'workflow SHA must match');
+              check(typeof family.name === 'string' && family.name.length > 0, 'family.name must be nonempty');
+              check(typeof family.version === 'string' && SEMVER.test(family.version), 'family.version must be semantic');
+              check(typeof family.distTag === 'string' && DIST_TAG.test(family.distTag), 'family.distTag must be valid');
+              check(source.tag === `v${family.version}`, 'source.tag must be v<family.version>');
+              const versionMatch = SEMVER.exec(String(family.version));
+              const prerelease = versionMatch?.[1];
+              const expectedDistTag = prerelease === undefined ? 'latest' : prerelease.split('.')[0];
+              check(family.distTag === expectedDistTag, 'family.distTag must be derived from version');
+              check(members.length > 1, 'a family must contain at least two packages');
+              const requestedFingerprint = (process.env.SALLYPORT_SIGNER_FINGERPRINT ?? '')
+                  .replace(/[\s:]/g, '').replace(/^0x/i, '').toUpperCase();
+              if (process.env.SALLYPORT_PROFILE === 'strict') {
+                  check(source.signed === true, 'strict profile requires a signed source');
+                  check(FINGERPRINT.test(requestedFingerprint), 'strict profile requires a fingerprint');
+                  check(source.signerFingerprint === requestedFingerprint, 'signer fingerprint must match');
+              } else {
+                  check(source.signed === false, 'standard profile requires unsigned source metadata');
+                  check(source.signerFingerprint === null, 'standard profile requires no fingerprint');
+              }
+              const names = new Set();
+              const files = new Set();
+              const plan = [];
+              for (const [index, member] of members.entries()) {
+                  const memberTarball = section(member.tarball);
+                  const filename = `package-${String(index + 1)}.tgz`;
+                  check(typeof member.name === 'string' && PACKAGE_NAME.test(member.name), 'family package name must be valid');
+                  check(!names.has(member.name), 'family package names must be unique');
+                  check(member.version === family.version, 'family package versions must match');
+                  check(member.access === 'public', 'family packages must be public');
+                  check(member.distTag === family.distTag, 'family package dist-tags must match');
+                  check(memberTarball.filename === filename, 'family tarball filenames must be ordered');
+                  check(!files.has(filename), 'family tarball filenames must be unique');
+                  names.add(member.name);
+                  files.add(filename);
+                  let bytes = Buffer.alloc(0);
+                  try { bytes = readFileSync(join(directory, filename)); }
+                  catch (error) { fail(`Candidate tarball is unreadable: ${error.message}`); }
+                  const sha256 = createHash('sha256').update(bytes).digest('hex');
+                  const sha512 = createHash('sha512').update(bytes).digest('hex');
+                  const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+                  check(bytes.byteLength === memberTarball.bytes, `${filename} byte length must match`);
+                  check(sha256 === memberTarball.sha256, `${filename} SHA-256 must match`);
+                  check(sha512 === memberTarball.sha512, `${filename} SHA-512 must match`);
+                  check(integrity === memberTarball.integrity, `${filename} integrity must match`);
+                  plan.push({ name: member.name, version: member.version, distTag: member.distTag,
+                      tarballPath: join(directory, filename), sha256 });
+              }
+              const expectedFiles = ['candidate.json', ...files].sort();
+              check(JSON.stringify(readdirSync(directory).sort()) === JSON.stringify(expectedFiles),
+                  'family artifact must contain exactly its receipt and tarballs');
+              if (problems.length > 0) {
+                  for (const problem of problems) process.stdout.write(`::error::Candidate rejected: ${problem}\n`);
+                  process.exit(1);
+              }
+              const planPath = join(directory, 'stage-plan.json');
+              writeFileSync(planPath, JSON.stringify(plan));
+              const outputs = { is_family: 'true', stage_plan: planPath, package_name: family.name,
+                  package_version: family.version, dist_tag: family.distTag, tarball_sha256: 'family',
+                  signer: source.signerFingerprint === null ? 'unsigned' : source.signerFingerprint };
+              appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout',
+                  Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
+              process.exit(0);
+          }
+
           check(receipt.schema === 1, 'schema must be 1');
           check(receipt.protocol === 'sallyport/0.1', 'protocol must be sallyport/0.1');
           check(typeof sallyport.version === 'string' && sallyport.version.length > 0, 'sallyport.version must be a nonempty string');
@@ -520,7 +598,7 @@ jobs:
           check(typeof sallyport.sha === 'string' && COMMIT.test(sallyport.sha), 'sallyport.sha must be a 40-character commit');
           check(typeof repository.name === 'string' && REPOSITORY.test(repository.name), 'repository.name must be owner/name');
           check(Number.isSafeInteger(repository.id) && repository.id > 0, 'repository.id must be a positive integer');
-          check(typeof repository.defaultBranch === 'string' && repository.defaultBranch.length > 0, 'repository.defaultBranch must be a nonempty string');
+          check(typeof repository.defaultBranch === 'string' && repository.defaultBranch.length >
           check(typeof source.tag === 'string' && source.tag.length > 0, 'source.tag must be a nonempty string');
           check(typeof source.tagObject === 'string' && COMMIT.test(source.tagObject), 'source.tagObject must be a 40-character object SHA');
           check(typeof source.commit === 'string' && COMMIT.test(source.commit), 'source.commit must be a 40-character commit');
@@ -600,19 +678,38 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', lines);
           SALLYPORT_NODE
 
-      - name: Stage package on npm
+      - name: Stage package family on npm
         env:
+          SALLYPORT_IS_FAMILY: ${{ steps.candidate.outputs.is_family }}
+          SALLYPORT_STAGE_PLAN: ${{ steps.candidate.outputs.stage_plan }}
           SALLYPORT_TARBALL: ${{ steps.candidate.outputs.tarball_path }}
           SALLYPORT_DIST_TAG: ${{ steps.candidate.outputs.dist_tag }}
           SALLYPORT_STAGE_JSON: ${{ runner.temp }}/stage.json
         run: |
-          npm stage publish \
-            "$SALLYPORT_TARBALL" \
-            --tag "$SALLYPORT_DIST_TAG" \
-            --access public \
-            --ignore-scripts \
-            --provenance \
-            --json > "$SALLYPORT_STAGE_JSON"
+          if [ "$SALLYPORT_IS_FAMILY" = true ]; then
+            node --input-type=module - <<'SALLYPORT_NODE'
+            import { execFileSync } from 'node:child_process';
+            import { readFileSync, writeFileSync } from 'node:fs';
+
+            const plan = JSON.parse(readFileSync(process.env.SALLYPORT_STAGE_PLAN ?? '', 'utf8'));
+            const staged = [];
+            for (const member of plan) {
+                const output = execFileSync('npm', ['stage', 'publish', member.tarballPath,
+                    '--tag', member.distTag, '--access', 'public', '--ignore-scripts',
+                    '--provenance', '--json'], { encoding: 'utf8' });
+                staged.push({ ...member, response: JSON.parse(output) });
+            }
+            writeFileSync(process.env.SALLYPORT_STAGE_JSON ?? '', JSON.stringify(staged));
+            SALLYPORT_NODE
+          else
+            npm stage publish \
+              "$SALLYPORT_TARBALL" \
+              --tag "$SALLYPORT_DIST_TAG" \
+              --access public \
+              --ignore-scripts \
+              --provenance \
+              --json > "$SALLYPORT_STAGE_JSON"
+          fi
 
       - name: Record stage identifier
         id: staged
@@ -658,7 +755,50 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout', `stage_id=${stageId ?? 'unknown'}\n`);
           SALLYPORT_NODE
 
+      - name: Summarize staged package family
+        if: steps.candidate.outputs.is_family == 'true'
+        env:
+          SALLYPORT_STAGE_JSON: ${{ runner.temp }}/stage.json
+          SALLYPORT_RUN_ID: ${{ github.run_id }}
+        run: |
+          node --input-type=module - <<'SALLYPORT_NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+
+          const STAGE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+          const KEYS = ['stageId', 'stage_id', 'stageID', 'id'];
+          const find = (value, depth = 0) => {
+              if (depth > 6 || value === null || typeof value !== 'object') return null;
+              for (const key of KEYS) {
+                  const candidate = value[key];
+                  if ((typeof candidate === 'string' || typeof candidate === 'number')
+                      && STAGE_ID.test(String(candidate))) return String(candidate);
+              }
+              for (const nested of Object.values(value)) {
+                  const found = find(nested, depth + 1);
+                  if (found !== null) return found;
+              }
+              return null;
+          };
+          const staged = JSON.parse(readFileSync(process.env.SALLYPORT_STAGE_JSON ?? '', 'utf8'));
+          const rows = staged.map((entry) => ({ ...entry, stageId: find(entry.response) ?? 'unknown' }));
+          const lines = ['## sallyport staged package family', '',
+              '| Package | Dist-tag | Candidate SHA-256 | Stage ID |',
+              '| --- | --- | --- | --- |'];
+          for (const row of rows) {
+              lines.push(`| \`${row.name}@${row.version}\` | \`${row.distTag}\` | \`${row.sha256}\` | \`${row.stageId}\` |`);
+          }
+          lines.push('', '### Review and approve every package, then finalize', '', '```sh');
+          for (const row of rows) {
+              lines.push(`npm stage view ${row.stageId}`);
+              lines.push(`npm stage download ${row.stageId}`);
+              lines.push(`npm stage approve ${row.stageId}`);
+          }
+          lines.push(`gh workflow run sallyport.yml -f candidate_run_id=${process.env.SALLYPORT_RUN_ID}`, '```', '');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY ?? '/dev/stdout', lines.join('\n'));
+          SALLYPORT_NODE
+
       - name: Summarize staged candidate
+        if: steps.candidate.outputs.is_family != 'true'
         env:
           SALLYPORT_PACKAGE: ${{ steps.candidate.outputs.package_name }}
           SALLYPORT_VERSION: ${{ steps.candidate.outputs.package_version }}

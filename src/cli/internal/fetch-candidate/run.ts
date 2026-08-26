@@ -1,9 +1,9 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isFamilyCandidateReceipt } from '../../../candidate/receipt.ts';
 import {
     CANDIDATE_RECEIPT_NAME,
-    CANDIDATE_TARBALL_NAME,
     fetchCandidateArtifact,
     GITHUB_API_BASE,
     githubRequest,
@@ -75,26 +75,39 @@ export async function fetchCandidateCommand(
             receipt,
         },
     });
-    failures.push(...tarballFailures(files.tarball, receipt));
+    failures.push(...tarballFailures(files.tarballs, receipt));
     if (failures.length > 0) {
-        throw failure(`Candidate retrieval failed for run ${String(runId)}:`, failures);
+        throw failure('Candidate retrieval failed for run ' + String(runId) + ':', failures);
     }
 
     await ensureDirectory(outputDir);
-    await writeFile(path.join(outputDir, CANDIDATE_TARBALL_NAME), files.tarball);
+    for (const [filename, bytes] of files.tarballs) {
+        await writeFile(path.join(outputDir, filename), bytes);
+    }
     await writeFile(path.join(outputDir, CANDIDATE_RECEIPT_NAME), files.receipt);
 
-    await effects.writeOutput({
+    const release = isFamilyCandidateReceipt(receipt)
+        ? receipt.family
+        : {
+            name: receipt.package.name,
+            version: receipt.package.version,
+            distTag: receipt.package.distTag,
+        };
+    const outputs: Record<string, string> = {
         tag: receipt.source.tag,
         tag_object: receipt.source.tagObject,
         commit: receipt.source.commit,
-        package_name: receipt.package.name,
-        package_version: receipt.package.version,
-        dist_tag: receipt.package.distTag,
-    });
+        package_name: release.name,
+        package_version: release.version,
+        dist_tag: release.distTag,
+    };
+    if (isFamilyCandidateReceipt(receipt)) {
+        outputs.package_count = String(receipt.packages.length);
+    }
+    await effects.writeOutput(outputs);
     effects.log(
-        `Retrieved candidate ${receipt.package.name}@${receipt.package.version}`
-        + ` from run ${String(runId)} into ${outputDir}.`,
+        'Retrieved candidate ' + release.name + '@' + release.version
+        + ' from run ' + String(runId) + ' into ' + outputDir + '.',
     );
 }
 

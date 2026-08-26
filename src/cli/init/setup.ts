@@ -36,7 +36,7 @@ export function setupChecklist(profile: Profile, version: string): string[] {
                 `Commit the public release signing key to ${SIGNING_KEY_FILE}.`,
             ]
             : [],
-        'Run the npm trust command above; npm allows one trusted publisher per package.',
+        'Run every npm trust command above; npm allows one trusted publisher per package.',
         'Set npm publishing access to require two-factor authentication and disallow tokens.',
         'Remove obsolete npm automation tokens.',
         'Declare exact GitHub Actions check names in package.json sallyport.requiredStatusChecks.',

@@ -1,8 +1,11 @@
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hashTarball } from '../../../src/candidate/inspect.ts';
-import { validateCandidateReceipt } from '../../../src/candidate/receipt.ts';
+import {
+    validateCandidateReceipt,
+    validateFamilyCandidateReceipt,
+} from '../../../src/candidate/receipt.ts';
 import { createCandidateCommand } from '../../../src/cli/internal/create-candidate.ts';
 import { packCommand } from '../../../src/cli/internal/pack.ts';
 import { smokeCommand } from '../../../src/cli/internal/smoke.ts';
@@ -14,6 +17,7 @@ import {
     readJsonFile,
     readTextFile,
     removeTempRoot,
+    writeJsonFile,
     type Consumer,
     type TestEffects,
 } from './fixture.ts';
@@ -350,4 +354,69 @@ describe('internal create-candidate', () => {
             '--output': empty,
         })).rejects.toThrow(/must exist; the candidate is packed exactly once/u);
     });
+    it('packs and seals EntityKit as one six-package family', async () => {
+        const directories = [
+            'packages/core',
+            'packages/sqlite',
+            'packages/postgres',
+            'packages/mysql',
+            'packages/cli',
+            'packages/testing',
+        ];
+        const version = '0.1.0-alpha.1';
+        const familyDir = path.join(root, 'entitykit');
+        mkdirSync(familyDir, { recursive: true });
+        const lockPackages: Record<string, { name: string; version: string }> = {
+            '': { name: 'entitykit', version },
+        };
+        writeJsonFile(path.join(familyDir, 'package.json'), {
+            name: 'entitykit',
+            version,
+            private: true,
+            workspaces: ['packages/*'],
+            repository: 'git+https://github.com/zsumz/entitykit.git',
+            sallyport: { packages: directories },
+        });
+        for (const directory of directories) {
+            const packageName = '@entitykit/' + directory.slice('packages/'.length);
+            lockPackages[directory] = { name: packageName, version };
+            writeJsonFile(path.join(familyDir, directory, 'package.json'), {
+                name: packageName,
+                version,
+                type: 'module',
+                main: 'index.js',
+                files: ['index.js'],
+                repository: {
+                    type: 'git',
+                    url: 'git+https://github.com/zsumz/entitykit.git',
+                    directory,
+                },
+                publishConfig: { access: 'public', provenance: true },
+            });
+            writeFileSync(path.join(familyDir, directory, 'index.js'), 'export default true;\n');
+        }
+        writeJsonFile(path.join(familyDir, 'package-lock.json'), {
+            name: 'entitykit',
+            version,
+            lockfileVersion: 3,
+            packages: lockPackages,
+        });
+        consumer = { dir: familyDir, name: 'entitykit', version, commit: FIXTURE_SHA };
+        outputDir = path.join(root, 'entitykit-out');
+
+        await pack();
+        await createCandidate();
+
+        const receipt = readJsonFile(path.join(outputDir, 'candidate.json'));
+        expect(validateFamilyCandidateReceipt(receipt)).toEqual([]);
+        expect((receipt as { packages: Array<{ name: string }> }).packages.map(
+            (member) => member.name,
+        )).toEqual(directories.map(
+            (directory) => '@entitykit/' + directory.slice('packages/'.length),
+        ));
+        for (let index = 1; index <= directories.length; index += 1) {
+            expect(existsSync(path.join(outputDir, `package-${String(index)}.tgz`))).toBe(true);
+        }
+    });
+
 });

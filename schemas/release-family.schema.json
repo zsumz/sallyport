@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zsumz/sallyport/schemas/release-family.schema.json",
+  "title": "sallyport package-family release record",
+  "description": "Record for a verified public npm package family released from one sealed candidate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "protocol", "candidateReceiptSha256", "releaseNotesSha256", "family", "packages", "source"],
+  "properties": {
+    "schema": { "const": 2 },
+    "protocol": { "const": "sallyport/0.2" },
+    "candidateReceiptSha256": { "$ref": "release.schema.json#/properties/candidateReceiptSha256" },
+    "releaseNotesSha256": { "$ref": "release.schema.json#/properties/releaseNotesSha256" },
+    "family": { "$ref": "candidate-family.schema.json#/$defs/family" },
+    "packages": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "distTag", "candidate", "registry"],
+        "properties": {
+          "name": { "$ref": "release.schema.json#/properties/package/properties/name" },
+          "version": { "$ref": "release.schema.json#/properties/package/properties/version" },
+          "distTag": { "$ref": "release.schema.json#/properties/package/properties/distTag" },
+          "candidate": { "$ref": "release.schema.json#/properties/candidate" },
+          "registry": { "$ref": "release.schema.json#/properties/registry" }
+        }
+      }
+    },
+    "source": { "$ref": "release.schema.json#/properties/source" }
+  }
+}

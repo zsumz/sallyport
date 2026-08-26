@@ -1,4 +1,4 @@
-import type { CandidateReceipt } from '../candidate/receipt.ts';
+import type { ReleaseCandidateReceipt } from '../candidate/receipt.ts';
 import {
     readNumberProperty,
     readProperty,
@@ -11,7 +11,7 @@ export interface CandidateRunExpectation {
     repositoryId: number;
     workflowPath: string;
     sallyportSha: string;
-    receipt: CandidateReceipt;
+    receipt: ReleaseCandidateReceipt;
 }
 
 export interface CandidateRunInput {

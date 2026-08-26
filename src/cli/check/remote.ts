@@ -31,15 +31,18 @@ export function runRemoteChecks(
     const repository = readRemoteJson(options, 'gh', [
         'api', `repos/${coordinates.repository}`,
     ]);
-    const npmTarget: RemoteTarget = {
+    const npmTargets: RemoteTarget[] = coordinates.packageNames.map((packageName) => ({
         repository: coordinates.repository,
-        packageName: coordinates.packageName,
+        packageName,
         dir: path.resolve(options.dir),
         profile: context.profile,
         defaultBranch: '',
-        requiredStatusChecks: context.metadata?.requiredStatusChecks,
-    };
-    const npmChecks = [npmTrustCheck(npmTarget, options), npmMfaCheck(npmTarget, options)];
+        requiredStatusChecks: context.releaseMetadata?.root.requiredStatusChecks,
+    }));
+    const npmChecks = [
+        aggregateNpmChecks('remote-npm-trust', npmTargets, npmTrustCheck, options),
+        aggregateNpmChecks('remote-npm-mfa', npmTargets, npmMfaCheck, options),
+    ];
     if (!repository.ok) {
         return unavailableGitHubChecks(context, npmChecks, repository.message);
     }
@@ -47,6 +50,10 @@ export function runRemoteChecks(
     if (defaultBranch === null || defaultBranch === '') {
         const message = 'GitHub returned no default branch for the repository.';
         return unavailableGitHubChecks(context, npmChecks, message);
+    }
+    const npmTarget = npmTargets[0];
+    if (npmTarget === undefined) {
+        return REMOTE_IDS.map((id) => result(id, 'fail', 'no release packages are configured.'));
     }
     const target: RemoteTarget = { ...npmTarget, defaultBranch };
     return [
@@ -80,15 +87,33 @@ function unavailableGitHubChecks(
 }
 
 function remoteCoordinates(context: CheckContext):
-    | { ok: true; repository: string; packageName: string }
+    | { ok: true; repository: string; packageNames: string[] }
     | { ok: false; message: string } {
-    const repository = normalizeRepositoryUrl(context.metadata?.repositoryUrl ?? '');
-    const packageName = context.metadata?.name?.trim();
-    if (repository === null || packageName === undefined || packageName === '') {
+    const release = context.releaseMetadata;
+    const repository = normalizeRepositoryUrl(release?.root.repositoryUrl ?? '');
+    const packageNames = release?.packages
+        .map((member) => member.name?.trim() ?? '') ?? [];
+    if (repository === null || packageNames.length === 0
+        || packageNames.some((name) => name === '')) {
         return {
             ok: false,
             message: 'valid package and GitHub repository metadata are required for remote checks.',
         };
     }
-    return { ok: true, repository, packageName };
+    return { ok: true, repository, packageNames };
+}
+
+function aggregateNpmChecks(
+    id: string,
+    targets: readonly RemoteTarget[],
+    check: (target: RemoteTarget, options: CheckOptions) => CheckResult,
+    options: CheckOptions,
+): CheckResult {
+    const checks = targets.map((target) => ({ target, check: check(target, options) }));
+    const status = checks.some((entry) => entry.check.status === 'fail')
+        ? 'fail'
+        : checks.some((entry) => entry.check.status === 'unverified') ? 'unverified' : 'pass';
+    const message = checks.map((entry) =>
+        `${entry.target.packageName}: ${entry.check.message}`).join(' ');
+    return result(id, status, message);
 }

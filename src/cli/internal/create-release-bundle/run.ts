@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isFamilyCandidateReceipt } from '../../../candidate/receipt.ts';
 import {
     CANDIDATE_RECEIPT_NAME,
     CANDIDATE_TARBALL_NAME,
@@ -9,6 +10,8 @@ import { sha256Hex } from '../../../registry/integrity.ts';
 import { parseArgv, requireValue } from '../../args.ts';
 import { ensureDirectory, errorMessage, failure } from '../../support.ts';
 import type { CliEffects } from '../effects.ts';
+import { parseReceipt } from '../fetch-candidate.ts';
+import { createFamilyReleaseBundle } from './family.ts';
 import {
     CHECKSUM_FILENAME,
     CHECKSUM_MEMBERS,
@@ -31,6 +34,20 @@ export async function createReleaseBundleCommand(
     const outputDir = path.resolve(requireValue(parsed, 'output'));
     await ensureDirectory(outputDir);
 
+    const receiptBytes = await readFile(path.join(candidateDir, CANDIDATE_RECEIPT_NAME));
+    const receipt = parseReceipt(receiptBytes);
+    if (isFamilyCandidateReceipt(receipt)) {
+        await createFamilyReleaseBundle({
+            candidateDir,
+            releaseFile,
+            notesFile,
+            outputDir,
+            receipt,
+            receiptBytes,
+            effects,
+        });
+        return;
+    }
     await copyInto(outputDir, CANDIDATE_TARBALL_NAME, path.join(candidateDir, CANDIDATE_TARBALL_NAME));
     await copyInto(outputDir, CANDIDATE_RECEIPT_NAME, path.join(candidateDir, CANDIDATE_RECEIPT_NAME));
     await copyInto(outputDir, RELEASE_RECORD_FILENAME, releaseFile);

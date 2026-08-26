@@ -6,6 +6,7 @@ export const CANDIDATE_RECEIPT_FILENAME = 'candidate.json';
 export const CREATE_CANDIDATE_FLAGS = [
     'consumer',
     'tarball',
+    'candidate-dir',
     'output',
     'profile',
     'tag',

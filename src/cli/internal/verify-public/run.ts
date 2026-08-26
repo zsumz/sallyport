@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isFamilyCandidateReceipt } from '../../../candidate/receipt.ts';
 import { inspectCandidateTarball } from '../../../candidate/inspect.ts';
 import {
     CANDIDATE_RECEIPT_NAME,
@@ -21,6 +22,7 @@ import type { CliEffects } from '../effects.ts';
 import { parseReceipt } from '../fetch-candidate.ts';
 import { PUBLIC_SMOKE_DIRECTORY, runReleaseSmoke, smokeDirectory } from '../smoke.ts';
 import { candidateFailures, convergedVersionMeta, profileFailures } from './entry.ts';
+import { verifyFamilyPublic } from './family-run.ts';
 import { PUBLIC_TARBALL_FILENAME, RELEASE_RECORD_FILENAME } from './model.ts';
 import { verifyProvenance } from './provenance.ts';
 import { createReleaseRecord, publicSummary } from './record.ts';
@@ -43,10 +45,27 @@ export async function verifyPublicCommand(
     await ensureDirectory(outputDir);
     const receiptBytes = await readFile(path.join(candidateDir, CANDIDATE_RECEIPT_NAME));
     const receipt = parseReceipt(receiptBytes);
+    const signerFailures = profileFailures(profile, requestedFingerprint, receipt);
+    if (isFamilyCandidateReceipt(receipt)) {
+        if (signerFailures.length > 0) {
+            throw failure('Public verification failed:', signerFailures);
+        }
+        await verifyFamilyPublic({
+            consumerDir,
+            candidateDir,
+            notesFile,
+            outputDir,
+            receipt,
+            receiptBytes,
+            skipSmoke: hasFlag(parsed, 'skip-smoke'),
+            effects,
+        });
+        return;
+    }
     const candidateBytes = await readFile(path.join(candidateDir, CANDIDATE_TARBALL_NAME));
     const entryFailures = [
         ...candidateFailures(candidateBytes, receipt),
-        ...profileFailures(profile, requestedFingerprint, receipt),
+        ...signerFailures,
     ];
     if (entryFailures.length > 0) {
         throw failure('Public verification failed:', entryFailures);

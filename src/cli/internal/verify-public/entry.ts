@@ -1,5 +1,8 @@
 import { hashTarball } from '../../../candidate/inspect.ts';
-import type { CandidateReceipt } from '../../../candidate/receipt.ts';
+import type {
+    CandidateReceipt,
+    ReleaseCandidateReceipt,
+} from '../../../candidate/receipt.ts';
 import { normalizeFingerprint } from '../../../contract/signing.ts';
 import type {
     RegistryConvergence,
@@ -21,7 +24,7 @@ export function candidateFailures(bytes: Buffer, receipt: CandidateReceipt): str
 export function profileFailures(
     profile: Profile,
     requested: string | undefined,
-    receipt: CandidateReceipt,
+    receipt: ReleaseCandidateReceipt,
 ): string[] {
     if (profile !== 'strict') {
         return [];

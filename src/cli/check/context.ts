@@ -1,7 +1,10 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { readPackageMetadata } from '../../contract/package.ts';
+import {
+    readPackageMetadata,
+    readReleaseMetadata,
+} from '../../contract/package.ts';
 import { RELEASE_NOTES_DIRECTORY } from '../../contract/release.ts';
 import type { CommandRunner } from '../../contract/signing.ts';
 import {
@@ -30,9 +33,11 @@ export async function loadContext(options: CheckOptions): Promise<CheckContext> 
     const dir = path.resolve(options.dir);
     const manifest = await readJsonFile(path.join(dir, 'package.json'));
     let metadata: CheckContext['metadata'] = null;
+    let releaseMetadata: CheckContext['releaseMetadata'] = null;
     let metadataError = '';
     try {
         metadata = await readPackageMetadata(dir);
+        releaseMetadata = await readReleaseMetadata(dir);
     } catch (error) {
         metadataError = errorMessage(error);
     }
@@ -40,6 +45,7 @@ export async function loadContext(options: CheckOptions): Promise<CheckContext> 
     const workflow = await readTextFile(path.join(dir, CALLER_WORKFLOW_FILE));
     return {
         metadata,
+        releaseMetadata,
         metadataError,
         scripts: readStringMap(manifest, 'scripts'),
         remote: remote.url,

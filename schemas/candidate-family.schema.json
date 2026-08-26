@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zsumz/sallyport/schemas/candidate-family.schema.json",
+  "title": "sallyport package-family candidate receipt",
+  "description": "Receipt for an ordered family of public npm package tarballs released from one repository and version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "protocol", "sallyport", "repository", "source", "family", "packages", "run"],
+  "properties": {
+    "schema": { "const": 2 },
+    "protocol": { "const": "sallyport/0.2" },
+    "sallyport": { "$ref": "candidate.schema.json#/properties/sallyport" },
+    "repository": { "$ref": "candidate.schema.json#/properties/repository" },
+    "source": { "$ref": "candidate.schema.json#/properties/source" },
+    "family": { "$ref": "#/$defs/family" },
+    "packages": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/package" }
+    },
+    "run": { "$ref": "candidate.schema.json#/properties/run" }
+  },
+  "$defs": {
+    "family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "distTag"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "$ref": "candidate.schema.json#/properties/package/properties/version" },
+        "distTag": { "$ref": "candidate.schema.json#/properties/package/properties/distTag" }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directory", "name", "version", "access", "distTag", "tarball"],
+      "properties": {
+        "directory": { "type": "string", "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$" },
+        "name": { "$ref": "candidate.schema.json#/properties/package/properties/name" },
+        "version": { "$ref": "candidate.schema.json#/properties/package/properties/version" },
+        "access": { "const": "public" },
+        "distTag": { "$ref": "candidate.schema.json#/properties/package/properties/distTag" },
+        "tarball": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["filename", "bytes", "sha256", "sha512", "integrity"],
+          "properties": {
+            "filename": { "type": "string", "pattern": "^package-[1-9][0-9]*\\.tgz$" },
+            "bytes": { "$ref": "candidate.schema.json#/properties/tarball/properties/bytes" },
+            "sha256": { "$ref": "candidate.schema.json#/properties/tarball/properties/sha256" },
+            "sha512": { "$ref": "candidate.schema.json#/properties/tarball/properties/sha512" },
+            "integrity": { "$ref": "candidate.schema.json#/properties/tarball/properties/integrity" }
+          }
+        }
+      }
+    }
+  }
+}

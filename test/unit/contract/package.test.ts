@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -7,7 +7,9 @@ import {
     normalizeRepositoryRemote,
     normalizeRepositoryUrl,
     readPackageMetadata,
+    readReleaseMetadata,
     validatePackageContract,
+    validateReleaseContract,
 } from '../../../src/contract/package.ts';
 
 const baseInput: PackageContractInput = {
@@ -54,6 +56,7 @@ async function packageDirectory(
     const dir = await mkdtemp(path.join(tmpdir(), 'sallyport-contract-'));
     temporaryDirectories.push(dir);
     for (const [name, value] of Object.entries(files)) {
+        await mkdir(path.dirname(path.join(dir, name)), { recursive: true });
         await writeFile(
             path.join(dir, name),
             `${JSON.stringify(value, null, 2)}\n`,
@@ -395,4 +398,93 @@ describe('readPackageMetadata', () => {
             hasReleaseNotes: true,
         })).toEqual([]);
     });
+});
+
+describe('EntityKit package-family contract', () => {
+    it('accepts the six public packages as one ordered release family', async () => {
+        const directories = [
+            'packages/core',
+            'packages/sqlite',
+            'packages/postgres',
+            'packages/mysql',
+            'packages/cli',
+            'packages/testing',
+        ];
+        const version = '0.1.0-alpha.1';
+        const repository = 'git+https://github.com/zsumz/entitykit.git';
+        const packages = Object.fromEntries(directories.map((directory) => [
+            directory,
+            { name: '@entitykit/' + directory.slice('packages/'.length), version },
+        ]));
+        const manifests = Object.fromEntries(directories.map((directory) => [
+            directory + '/package.json',
+            {
+                ...packages[directory],
+                repository: { type: 'git', url: repository, directory },
+                publishConfig: { access: 'public', provenance: true },
+            },
+        ]));
+        const dir = await packageDirectory({
+            'package.json': {
+                name: 'entitykit',
+                version,
+                private: true,
+                workspaces: ['packages/*'],
+                repository,
+                sallyport: { packages: directories },
+            },
+            'package-lock.json': {
+                name: 'entitykit',
+                version,
+                lockfileVersion: 3,
+                packages: { '': { name: 'entitykit', version }, ...packages },
+            },
+            ...manifests,
+        });
+
+        const release = await readReleaseMetadata(dir);
+
+        expect(release.isFamily).toBe(true);
+        expect(release.packages.map((member) => member.name)).toEqual([
+            '@entitykit/core',
+            '@entitykit/sqlite',
+            '@entitykit/postgres',
+            '@entitykit/mysql',
+            '@entitykit/cli',
+            '@entitykit/testing',
+        ]);
+        expect(validateReleaseContract({
+            metadata: release,
+            tag: 'v' + version,
+            expectedRepository: 'zsumz/entitykit',
+            registryVersions: new Set<string>(),
+            hasReleaseNotes: true,
+        })).toEqual([]);
+    });
+    it('rejects parent traversal without reading the outside manifest', async () => {
+        const outside = await mkdtemp(path.join(tmpdir(), 'sallyport-outside-'));
+        temporaryDirectories.push(outside);
+        await writeFile(path.join(outside, 'package.json'), JSON.stringify({
+            name: '@entitykit/outside',
+            version: '0.1.0',
+        }));
+        const configured = '../' + path.basename(outside);
+        const dir = await packageDirectory({
+            'package.json': {
+                name: 'entitykit',
+                version: '0.1.0',
+                private: true,
+                workspaces: ['packages/*'],
+                sallyport: { packages: [configured, 'packages/core'] },
+            },
+        });
+
+        const release = await readReleaseMetadata(dir);
+
+        expect(release.packages).toEqual([]);
+        expect(release.configurationFailures.join(' ')).toContain(
+            'must be a safe normalized relative path',
+        );
+    });
+
 });

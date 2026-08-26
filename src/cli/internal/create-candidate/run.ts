@@ -6,7 +6,7 @@ import {
     buildCandidateReceipt,
     CANDIDATE_TARBALL_FILENAME,
 } from '../../../candidate/receipt.ts';
-import { readPackageMetadata } from '../../../contract/package.ts';
+import { readReleaseMetadata } from '../../../contract/package.ts';
 import { deriveDistTag } from '../../../contract/semver.ts';
 import {
     optionalValue,
@@ -24,8 +24,9 @@ import {
     CREATE_CANDIDATE_FLAGS,
     STAGE_WORKFLOW_REFERENCE,
 } from './model.ts';
+import { createFamilyReceipt } from './family.ts';
 import { assertStagedTarball, requireCommit, signerFingerprint } from './policy.ts';
-import { receiptSummary } from './summary.ts';
+import { familyReceiptSummary, receiptSummary } from './summary.ts';
 
 export async function createCandidateCommand(
     argv: readonly string[],
@@ -33,7 +34,9 @@ export async function createCandidateCommand(
 ): Promise<void> {
     const parsed = parseArgv(argv, { strings: [...CREATE_CANDIDATE_FLAGS] });
     const consumerDir = path.resolve(requireValue(parsed, 'consumer'));
-    const tarballPath = path.resolve(requireValue(parsed, 'tarball'));
+    const tarballValue = optionalValue(parsed, 'tarball');
+    const candidateDir = path.resolve(
+        optionalValue(parsed, 'candidate-dir') ?? path.dirname(tarballValue ?? 'package.tgz'));
     const outputDir = path.resolve(requireValue(parsed, 'output'));
     const profile = parseProfile(requireValue(parsed, 'profile'));
     const tag = requireValue(parsed, 'tag');
@@ -52,9 +55,9 @@ export async function createCandidateCommand(
         optionalValue(parsed, 'signer-fingerprint'),
     );
 
-    const metadata = await readPackageMetadata(consumerDir);
-    const name = metadata.name;
-    const version = metadata.version;
+    const release = await readReleaseMetadata(consumerDir);
+    const name = release.root.name;
+    const version = release.root.version;
     if (name === undefined || version === undefined) {
         throw failure('Candidate receipt failed:', [
             'package.json must declare both a name and a version.',
@@ -64,6 +67,28 @@ export async function createCandidateCommand(
     if ('error' in decision) {
         throw failure('Candidate receipt failed:', [decision.error]);
     }
+    if (release.isFamily) {
+        const receipt = await createFamilyReceipt(release, candidateDir, {
+            sallyport: {
+                version: await readsallyportVersion(),
+                workflow: STAGE_WORKFLOW_REFERENCE,
+                sha: sallyportSha,
+            },
+            repository: { name: repository, id: repositoryId, defaultBranch },
+            source: { tag, tagObject, commit, signed, signerFingerprint: fingerprint },
+            run: { id: runId, attempt: runAttempt },
+            distTag: decision.distTag,
+        });
+        const receiptPath = path.join(outputDir, CANDIDATE_RECEIPT_FILENAME);
+        await writeFile(receiptPath, jsonDocument(receipt));
+        await effects.writeSummary(familyReceiptSummary(receipt, profile));
+        effects.log('Wrote ' + receiptPath + '.');
+        return;
+    }
+    if (tarballValue === undefined) {
+        throw failure('Candidate receipt failed:', ['--tarball is required for one package.']);
+    }
+    const tarballPath = path.resolve(tarballValue);
 
     const tarball = await readFile(tarballPath);
     const manifest = assertCandidateTarball(tarball);

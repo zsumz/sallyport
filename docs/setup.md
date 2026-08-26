@@ -1,6 +1,6 @@
 # Setting up a consumer repository
 
-One-time setup per package. sallyport never mutates repository settings; every
+One-time setup per repository. sallyport never mutates repository settings; every
 step below is performed by a maintainer. See [protocol](./protocol.md) for
 what each setting protects.
 
@@ -13,8 +13,8 @@ npx sallyport init --strict
 ```
 
 `init` reads `package.json` and `package-lock.json`, detects the GitHub
-repository, verifies that this is one root public package, checks for the
-`release:check` and `release:smoke` scripts, and generates
+repository, verifies either one root public package or an explicit public
+package family, checks for the `release:check` and `release:smoke` scripts, and generates
 `.github/workflows/sallyport.yml` with both reusable workflows pinned to the
 exact sallyport commit associated with the installed CLI. With `--strict` it
 also creates the `docs/releases/` and `etc/` directories, prints the npm trust
@@ -26,6 +26,28 @@ Use plain `init` for the standard profile:
 ```sh
 npx sallyport init
 ```
+
+For a package family, the root is private, owns the single lockfile and version,
+and declares a literal ordered roster. Sallyport does not expand globs. EntityKit's
+configuration is:
+
+```json
+{
+  "sallyport": {
+    "packages": [
+      "packages/core",
+      "packages/sqlite",
+      "packages/postgres",
+      "packages/mysql",
+      "packages/cli",
+      "packages/testing"
+    ]
+  }
+}
+```
+
+Every member must be public, use the root version, appear in the root lockfile,
+and declare the same GitHub repository plus its exact `repository.directory`.
 
 `init` does not invent a smoke test. Writing `release:smoke` is the consumer's
 job; see [protocol](./protocol.md#releasesmoke) for its contract.
@@ -73,7 +95,9 @@ npm trust github smoque \
 
 The `--file` argument is the **calling** workflow filename only, not
 `stage.yml`, and not a path. npm allows one trusted publisher per package, so
-an existing trust entry must be edited or revoked during migration.
+run the printed trust command once for every family member. EntityKit therefore
+configures six stage-only trusted publishers. An existing trust entry must be
+edited or revoked during migration.
 
 ## 5. npm package settings
 

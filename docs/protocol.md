@@ -1,6 +1,7 @@
 # The sallyport protocol
 
-Protocol string `sallyport/0.1`. Receipt schema version `1`.
+Single-package documents use `sallyport/0.1`, schema `1`. Explicit package-family
+documents use `sallyport/0.2`, schema `2`.
 
 This document is normative. "Must" and "never" describe behavior sallyport
 enforces and its test suite proves. A release that violates any statement here
@@ -8,11 +9,12 @@ must fail closed rather than continue.
 
 ## 1. Scope
 
-### Supported in v0.1.0
+### Supported
 
 - GitHub Actions, GitHub-hosted Linux runners, public GitHub repositories, and
   public npm packages.
-- npm with `package-lock.json`; one root package per repository.
+- npm with one root `package-lock.json`; either one public root package or one
+  explicit ordered family of public workspace packages.
 - Stable and prerelease SemVer, with tags exactly matching
   `v<package-version>`.
 - npm trusted publishing with OIDC, restricted to stage-only publishing.
@@ -22,12 +24,11 @@ must fail closed rather than continue.
 
 ### Deliberately not supported
 
-- npm workspaces and multi-package releases; private npm packages; private npm
-  dependencies.
+- Implicit workspace discovery, independent package versions, private npm packages,
+  and private npm dependencies.
 - Registries other than npm; pnpm, Yarn, Bun, or JSR; self-hosted runners.
 - Automated repository-settings mutation; arbitrary workflow customization.
-- Custom publishing shell commands; multiple packages from one tag;
-  conventional-commit changelog generation.
+- Custom publishing shell commands; conventional-commit changelog generation.
 
 Trusted publishing requires a supported cloud-hosted runner; self-hosted
 runners are unsupported. The local CLI supports Node `22.18.0` and newer.
@@ -53,6 +54,20 @@ For remote posture audits, `package.json` also declares the exact GitHub
 Actions job names in `sallyport.requiredStatusChecks`. This policy is reviewed
 with the repository and compared exactly with the default-branch ruleset.
 
+A single-package repository needs no roster and retains the `sallyport/0.1`
+document shape. A package family must use a private workspace root and declare
+a literal, ordered `sallyport.packages` array with at least two members. Globs, inferred
+workspaces, duplicate paths, parent traversal, absolute paths, and independent
+member versions are rejected. Every member must be public, appear in the root
+lockfile, use the root version and repository, and set `repository.directory`
+to its roster path.
+
+One tag, version, dist-tag, candidate receipt, release record, and GitHub Release
+cover the whole family. The roster order fixes tarball names as `package-1.tgz`,
+`package-2.tgz`, and so on. Every package gets its own npm trusted publisher,
+stage ID, 2FA approval, registry-byte verification, signature verification, and
+provenance verification; finalization fails unless all members converge.
+
 ### `release:check`
 
 Runs against the tagged source tree. The script must:
@@ -74,15 +89,12 @@ npm ci
 npm run release:check
 ```
 
-sallyport then performs the one release pack:
+sallyport then packs each configured release package exactly once with
+`npm pack --ignore-scripts --json`. A single release produces `package.tgz`; a
+family produces the ordered `package-N.tgz` set.
 
-```sh
-npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/sallyport"
-```
-
-The release candidate is packed exactly once. Because package code ran in that
-job, the bytes become authoritative only after the fresh `seal` job inspects
-and hashes the downloaded artifact.
+Because package code ran in that job, the bytes become authoritative only after
+the fresh `seal` job inspects and hashes the downloaded artifact.
 
 ### `release:smoke`
 
@@ -96,17 +108,32 @@ SALLYPORT_VERSION=0.1.2
 SALLYPORT_DIST_TAG=latest
 ```
 
+For a family, `SALLYPORT_PACKAGES` is the absolute path to a JSON document:
+
+```json
+{
+  "family": { "name": "entitykit", "version": "0.1.0-alpha.1", "distTag": "alpha" },
+  "packages": [
+    { "directory": "packages/core", "name": "@entitykit/core", "version": "0.1.0-alpha.1", "distTag": "alpha", "tarball": "/absolute/path/smoke-package-1.tgz", "sha256": "..." }
+  ]
+}
+```
+
+The real manifest contains every roster member in order. `SALLYPORT_VERSION` and
+`SALLYPORT_DIST_TAG` remain available for family-wide assertions. The smoke
+script must exercise the packages together and install only the supplied copies.
+
 The script must:
 
-- install `SALLYPORT_TARBALL` into an isolated fixture, using
+- install the supplied tarball or family tarballs into isolated fixtures, using
   `--ignore-scripts`;
-- verify package exports, types, CLI behavior, or other package-specific
-  contracts.
+- verify package exports, types, CLI behavior, cross-package integration, or
+  other package-specific contracts.
 
 The script must never repack the repository, never publish, and never modify
-the supplied tarball. sallyport provides a copy of the tarball and verifies that
-copy's hash afterward. This is the only package-specific part of the release
-system.
+the supplied tarball copies. Sallyport verifies every copy's hash afterward and
+then re-verifies the authoritative candidate files. This is the only
+package-specific part of the release system.
 
 ## 3. The generated caller workflow
 
@@ -242,9 +269,10 @@ no authority        └─> candidate_smoke ─┘
 Permissions: `contents: read` only. No OIDC. No write access.
 
 **Step A — validate the invocation.** The event must be `push`, the ref must
-be a tag, the tag must equal `v<package-version>`, the repository must match
-`package.json` `repository`, the package must be public, the repository must
-contain one root package, and `package-lock.json` must be present. The tag
+be a tag, the tag must equal `v<release-version>`, the repository must match
+`package.json` `repository`, every release member must be public, the root must
+be either the package or an explicitly configured family, and `package-lock.json`
+must be present. The tag
 must resolve to the event commit and be reachable from the exact default branch
 ref fetched into `refs/sallyport/default-branch`. In strict mode, the annotated
 signed tag and expected fingerprint must verify.
@@ -281,11 +309,12 @@ required release notes must exist.
 **Step E — run repository validation.** `npm ci`, then
 `npm run release:check`. No secrets are present.
 
-**Step F — pack once.** `npm pack --ignore-scripts --json`, renaming the
-artifact to the fixed safe name `package.tgz`. This is an untrusted byte output;
-the fresh `seal` job performs the authoritative manifest inspection and digest.
+**Step F — pack once per member.** `npm pack --ignore-scripts --json`, renaming
+outputs to the fixed safe `package.tgz` or ordered `package-N.tgz` names. These
+are untrusted byte outputs; the fresh `seal` job performs authoritative manifest
+inspection and hashing.
 
-`prepare` uploads only `package.tgz`. Its artifact ID, not its name, is handed
+`prepare` uploads only that tarball set. Its artifact ID, not its name, is handed
 to the next job. No metadata written by package code is trusted.
 
 ### Job 2: `seal`
@@ -313,10 +342,12 @@ authoritative candidate receipt (`candidate.json`):
 }
 ```
 
-The sealed artifact is named
+The example above is the preserved `sallyport/0.1` single-package receipt. A
+family receipt uses schema `2`, adds `family` and an ordered `packages` array,
+and records one tarball digest per member. The sealed artifact is named
 `sallyport-candidate-<tag-commit-sha>-<run-attempt>`, contains exactly
-`package.tgz` and `candidate.json`, and is retained for 90 days. Its immutable
-artifact ID is handed to `candidate_smoke` and `stage`.
+`candidate.json` plus its receipt-named tarball set, and is retained for 90 days.
+Its immutable artifact ID is handed to `candidate_smoke` and `stage`.
 
 ### Job 3: `candidate_smoke`
 
@@ -341,21 +372,19 @@ repository write permission, and no shell command assembled from unvalidated
 package values.
 
 It waits for `candidate_smoke` and downloads only the artifact ID emitted by
-`seal`. Embedded dependency-free Node code
-recomputes the tarball digest and independently binds repository name and ID,
-default branch, tag, commit, run ID and attempt, workflow SHA, profile, signer,
-version, and derived dist-tag to trusted GitHub context. It then invokes:
+`seal`. Embedded dependency-free Node code recomputes every tarball digest and
+independently binds repository name and ID, default branch, tag, commit, run ID
+and attempt, workflow SHA, profile, signer, version, ordered roster, and derived
+dist-tag to trusted GitHub context. It then invokes once per member:
 
 ```text
 npm stage publish package.tgz --tag <validated-dist-tag> --access public --ignore-scripts --provenance --json
 ```
 
-It then parses and records the returned stage ID.
-
-The stage summary reports package@version, dist-tag, candidate SHA, stage ID,
-candidate run ID, and signer, plus the next commands: `npm stage view`,
-`npm stage download`, `npm stage approve`, and
-`gh workflow run sallyport.yml -f candidate_run_id=<run-id>`.
+It parses and records every returned stage ID. The stage summary reports each
+package, candidate SHA, and stage ID plus `npm stage view`, `npm stage download`,
+and `npm stage approve` commands for every member. Finalization is started only
+after every stage is approved.
 
 ## 7. Human approval
 
@@ -421,11 +450,12 @@ attestation must exist and identify the expected GitHub repository and
 workflow run.
 
 **Step E — seal the release bundle.** Before any consumer dependency or script
-runs, build and upload `package.tgz`, `candidate.json`, `release.json`,
-`SHA256SUMS`, and `RELEASE_NOTES.md`. Every file except the checksum file is
-listed in `SHA256SUMS`; the immutable bundle artifact ID is a job output.
+runs, build and upload the receipt-named tarball set, `candidate.json`,
+`release.json`, `SHA256SUMS`, and `RELEASE_NOTES.md`. Every file except the
+checksum file is listed in `SHA256SUMS`; the immutable bundle artifact ID is a
+job output.
 
-`release.json`:
+The preserved single-package `release.json`:
 
 ```json
 {
@@ -440,6 +470,10 @@ listed in `SHA256SUMS`; the immutable bundle artifact ID is a job output.
 }
 ```
 
+A family release record uses schema `2`, replaces `package`, `candidate`, and
+`registry` with `family` plus an ordered `packages` array, and carries the three
+verification booleans and both public digests for every member.
+
 ### Job 2: `public_smoke`
 
 Permissions: `actions: read`, `contents: read`. No OIDC or write access.
@@ -447,8 +481,8 @@ Permissions: `actions: read`, `contents: read`. No OIDC or write access.
 This separate job installs the exact consumer's dependencies with
 `npm ci --ignore-scripts`, then downloads the sealed bundle by artifact ID.
 Embedded workflow code validates `candidate.json` and every tarball digest,
-runs only the explicit `release:smoke` script against a copy, and rehashes both
-the copy and authoritative tarball afterward. It uploads no artifact and
+runs only the explicit `release:smoke` script against copies, and rehashes every
+copy and authoritative tarball afterward. It uploads no artifact and
 exposes no output; the release job consumes only its success.
 
 ### Job 3: `release`
@@ -469,8 +503,8 @@ each write, then peels that object to the verified commit and publishes draft-fi
 
 1. Create a draft GitHub Release for the existing tag.
 2. Add the committed release notes.
-3. Attach `package.tgz`, `candidate.json`, `release.json`,
-   `RELEASE_NOTES.md`, and `SHA256SUMS`.
+3. Attach the explicit receipt-named tarball set, `candidate.json`,
+   `release.json`, `RELEASE_NOTES.md`, and `SHA256SUMS`.
 4. Publish the draft.
 
 Immutable releases fix assets and the tag at publication, so the draft-first

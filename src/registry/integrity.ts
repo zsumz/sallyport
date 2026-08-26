@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
-import type { CandidateReceipt } from '../candidate/receipt.ts';
-import type { RegistryVersionMeta } from './download.ts';
+import type {
+    RegistryCandidate,
+    RegistryVersionMeta,
+} from './download.ts';
 
 // Hashing is duplicated from the candidate area on purpose: the verifier that
 // compares public bytes must not share code with the producer of the digests
@@ -18,7 +20,7 @@ export interface PackedManifest {
 }
 
 export interface RegistryIntegrityInput {
-    receipt: CandidateReceipt;
+    receipt: RegistryCandidate;
     versionMeta: RegistryVersionMeta;
     publicTarball: Uint8Array;
     packedManifest: PackedManifest | null;

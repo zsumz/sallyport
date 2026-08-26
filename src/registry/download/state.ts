@@ -1,7 +1,7 @@
-import type { CandidateReceipt } from '../../candidate/receipt.ts';
 import { readProperty, readStringProperty } from './json.ts';
 import {
     retryPlan,
+    type RegistryCandidate,
     type RegistryState,
     type RegistryStateInput,
     type RegistryVersionMeta,
@@ -94,7 +94,7 @@ export function shouldContinue(attempt: number, state: RegistryState): boolean {
 
 function permanentFailures(
     meta: RegistryVersionMeta,
-    candidate: CandidateReceipt,
+    candidate: RegistryCandidate,
     registry: string,
 ): string[] {
     const failures: string[] = [];

@@ -237,69 +237,19 @@ jobs:
           artifact-ids: ${{ needs.verify_core.outputs.bundle_artifact_id }}
           path: ${{ runner.temp }}/bundle
 
-      - name: Authenticate and smoke sealed public bytes
-        env:
-          SALLYPORT_BUNDLE_DIR: ${{ runner.temp }}/bundle
-          SALLYPORT_CONSUMER_DIR: ${{ github.workspace }}/consumer
-          SALLYPORT_SMOKE_TARBALL: ${{ runner.temp }}/smoke-package.tgz
-        run: |
-          node --input-type=module - <<'SALLYPORT_NODE'
-          import { execFileSync } from 'node:child_process';
-          import { createHash } from 'node:crypto';
-          import { copyFileSync, readFileSync } from 'node:fs';
-          import { join } from 'node:path';
+      - name: Check out exact sallyport implementation
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: zsumz/sallyport
+          ref: ${{ job.workflow_sha }}
+          path: sallyport
+          persist-credentials: false
 
-          const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
-          const receipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
-          const tarball = process.env.SALLYPORT_SMOKE_TARBALL ?? '';
-          const authoritative = join(directory, 'package.tgz');
-          const expected = receipt?.tarball;
-          const digest = (file) => {
-              const bytes = readFileSync(file);
-              return {
-                  bytes: bytes.byteLength,
-                  sha256: createHash('sha256').update(bytes).digest('hex'),
-                  sha512: createHash('sha512').update(bytes).digest('hex'),
-                  integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
-              };
-          };
-          const check = (condition, message) => {
-              if (!condition) throw new Error(message);
-          };
-          const assertExpected = (file, actual) => {
-              check(expected?.filename === 'package.tgz', 'candidate.json names the wrong tarball');
-              check(actual.bytes === expected?.bytes, `${file} byte length does not match candidate.json`);
-              check(actual.sha256 === expected?.sha256, `${file} SHA-256 does not match candidate.json`);
-              check(actual.sha512 === expected?.sha512, `${file} SHA-512 does not match candidate.json`);
-              check(actual.integrity === expected?.integrity, `${file} SRI does not match candidate.json`);
-          };
-          check(receipt?.schema === 1, 'candidate.json schema must be 1');
-          check(receipt?.protocol === 'sallyport/0.1', 'candidate.json protocol is unsupported');
-          for (const [name, value] of Object.entries({
-              package: receipt?.package?.name,
-              version: receipt?.package?.version,
-              distTag: receipt?.package?.distTag,
-          })) {
-              check(typeof value === 'string' && value !== '' && !value.includes('\n'),
-                  `candidate.json has an invalid ${name}`);
-          }
-          assertExpected('authoritative package.tgz', digest(authoritative));
-          copyFileSync(authoritative, tarball);
-          assertExpected('smoke copy', digest(tarball));
-          execFileSync('npm', ['run', 'release:smoke'], {
-              cwd: process.env.SALLYPORT_CONSUMER_DIR,
-              env: {
-                  ...process.env,
-                  SALLYPORT_TARBALL: tarball,
-                  SALLYPORT_PACKAGE: receipt.package.name,
-                  SALLYPORT_VERSION: receipt.package.version,
-                  SALLYPORT_DIST_TAG: receipt.package.distTag,
-              },
-              stdio: 'inherit',
-          });
-          assertExpected('smoke copy after smoke', digest(tarball));
-          assertExpected('authoritative package.tgz after smoke', digest(authoritative));
-          SALLYPORT_NODE
+      - name: Authenticate and smoke sealed public bytes
+        run: |
+          node "$GITHUB_WORKSPACE/sallyport/src/cli/main.ts" internal smoke \
+            --consumer "$GITHUB_WORKSPACE/consumer" \
+            --candidate-dir "$RUNNER_TEMP/bundle"
 
   # Only this job can write repository contents; it runs no consumer code.
   release:
@@ -488,6 +438,125 @@ jobs:
           release = section(release);
           receipt = section(receipt);
 
+          if (receipt.protocol === 'sallyport/0.2' || release.protocol === 'sallyport/0.2') {
+              const family = section(receipt.family);
+              const releaseFamily = section(release.family);
+              const source = section(release.source);
+              const receiptSource = section(receipt.source);
+              const receiptRepository = section(receipt.repository);
+              const receiptSallyport = section(receipt.sallyport);
+              const receiptRun = section(receipt.run);
+              const members = Array.isArray(receipt.packages) ? receipt.packages.map(section) : [];
+              const released = Array.isArray(release.packages) ? release.packages.map(section) : [];
+              check(receipt.schema === 2 && receipt.protocol === 'sallyport/0.2', 'candidate family contract must be sallyport/0.2 schema 2');
+              check(release.schema === 2 && release.protocol === 'sallyport/0.2', 'release family contract must be sallyport/0.2 schema 2');
+              check(typeof family.name === 'string' && family.name.length > 0, 'family.name must be nonempty');
+              check(typeof family.version === 'string' && SEMVER.test(family.version), 'family.version must be semantic');
+              check(typeof family.distTag === 'string' && DIST_TAG.test(family.distTag), 'family.distTag must be valid');
+              check(releaseFamily.name === family.name && releaseFamily.version === family.version
+                  && releaseFamily.distTag === family.distTag, 'release family identity must match candidate');
+              check(members.length > 1 && released.length === members.length, 'family package rosters must match');
+              check(source.repository === process.env.SALLYPORT_REPOSITORY, 'release repository must match');
+              check(source.tag === receiptSource.tag && source.commit === receiptSource.commit, 'release source must match candidate');
+              check(source.tag === `v${family.version}`, 'source tag must match family version');
+              check(receiptRepository.name === process.env.SALLYPORT_REPOSITORY, 'candidate repository must match');
+              check(String(receiptRepository.id) === process.env.SALLYPORT_REPOSITORY_ID, 'candidate repository ID must match');
+              check(receiptRepository.defaultBranch === process.env.SALLYPORT_DEFAULT_BRANCH, 'candidate default branch must match');
+              check(receiptSallyport.workflow === 'zsumz/sallyport/.github/workflows/stage.yml', 'candidate workflow must match');
+              check(receiptSallyport.sha === process.env.SALLYPORT_WORKFLOW_SHA, 'candidate workflow SHA must match');
+              check(String(receiptRun.id) === process.env.SALLYPORT_CANDIDATE_RUN_ID, 'candidate run ID must match');
+              const expectedFingerprint = (process.env.SALLYPORT_SIGNER_FINGERPRINT ?? '')
+                  .replace(/[\s:]/g, '').replace(/^0x/i, '').toUpperCase();
+              if (process.env.SALLYPORT_PROFILE === 'strict') {
+                  check(receiptSource.signed === true, 'strict profile requires signed source');
+                  check(FINGERPRINT.test(expectedFingerprint), 'strict profile requires a signer fingerprint');
+                  check(receiptSource.signerFingerprint === expectedFingerprint, 'candidate signer must match');
+              } else {
+                  check(receiptSource.signed === false, 'standard profile requires unsigned source metadata');
+                  check(receiptSource.signerFingerprint === null, 'standard profile requires no signer');
+              }
+              let originNames = [];
+              try { originNames = readdirSync(originDirectory).sort(); }
+              catch (error) { fail(`Originating candidate directory is unreadable: ${error.message}`); }
+              const tarballNames = members.map((member, index) => {
+                  const tarball = section(member.tarball);
+                  const expected = `package-${String(index + 1)}.tgz`;
+                  check(tarball.filename === expected, 'family tarballs must use deterministic ordered names');
+                  return expected;
+              });
+              const expectedOrigin = ['candidate.json', ...tarballNames].sort();
+              check(JSON.stringify(originNames) === JSON.stringify(expectedOrigin),
+                  'originating family artifact contains unexpected files');
+              const expectedBundle = [...expectedOrigin, 'release.json', 'RELEASE_NOTES.md', 'SHA256SUMS'].sort();
+              check(JSON.stringify(readdirSync(directory).sort()) === JSON.stringify(expectedBundle),
+                  'family release bundle contains unexpected files');
+              check(read('candidate.json').equals(readOrigin('candidate.json')), 'candidate receipt must equal origin');
+              const names = new Set();
+              for (const [index, member] of members.entries()) {
+                  const tarball = section(member.tarball);
+                  const record = released[index] ?? {};
+                  const candidate = section(record.candidate);
+                  const registry = section(record.registry);
+                  const filename = tarballNames[index];
+                  check(typeof member.name === 'string' && PACKAGE_NAME.test(member.name), 'family package name must be valid');
+                  check(!names.has(member.name), 'family package names must be unique');
+                  names.add(member.name);
+                  check(member.version === family.version && member.distTag === family.distTag
+                      && member.access === 'public', 'family member release policy must match');
+                  check(record.name === member.name && record.version === member.version
+                      && record.distTag === member.distTag, 'release package must match candidate member');
+                  check(read(filename).equals(readOrigin(filename)), `${filename} must equal origin`);
+                  const bytes = read(filename);
+                  const sha256 = createHash('sha256').update(bytes).digest('hex');
+                  const sha512 = createHash('sha512').update(bytes).digest('hex');
+                  const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+                  check(bytes.byteLength === tarball.bytes && sha256 === tarball.sha256
+                      && sha512 === tarball.sha512 && integrity === tarball.integrity,
+                      `${filename} must match candidate receipt`);
+                  check(candidate.sha256 === sha256 && candidate.sha512 === sha512,
+                      `${filename} must match release candidate digests`);
+                  check(registry.sha256 === sha256 && registry.sha512 === sha512,
+                      `${filename} must match verified registry bytes`);
+                  check(registry.integrityVerified === true && registry.signatureVerified === true
+                      && registry.provenanceVerified === true,
+                      `${member.name} registry evidence must be complete`);
+              }
+              check(digest('candidate.json') === release.candidateReceiptSha256, 'candidate receipt digest must match release');
+              check(read('RELEASE_NOTES.md').byteLength > 0, 'release notes must not be empty');
+              check(digest('RELEASE_NOTES.md') === release.releaseNotesSha256, 'release notes digest must match');
+              const listed = new Set();
+              for (const line of read('SHA256SUMS').toString('utf8').split('\n')) {
+                  if (line.trim() === '') continue;
+                  const match = SUM_LINE.exec(line);
+                  if (match === null) { problems.push(`SHA256SUMS line is malformed: ${line}`); continue; }
+                  listed.add(match[2].trim());
+                  check(digest(match[2].trim()) === match[1], `SHA256SUMS does not match ${match[2].trim()}`);
+              }
+              for (const name of expectedBundle.filter((entry) => entry !== 'SHA256SUMS')) {
+                  check(listed.has(name), `SHA256SUMS must list ${name}`);
+              }
+              const candidateRun = ghJson(`repos/${process.env.SALLYPORT_REPOSITORY}/actions/runs/${process.env.SALLYPORT_CANDIDATE_RUN_ID}`);
+              const runRepository = section(candidateRun.repository);
+              check(String(candidateRun.run_attempt) === String(receiptRun.attempt), 'candidate run attempt must match');
+              check(String(runRepository.id) === process.env.SALLYPORT_REPOSITORY_ID, 'candidate run repository must match');
+              check(candidateRun.path === '.github/workflows/sallyport.yml' && candidateRun.event === 'push'
+                  && candidateRun.conclusion === 'success', 'candidate workflow run must be a successful tag push');
+              check(candidateRun.head_branch === receiptSource.tag && candidateRun.head_sha === receiptSource.commit,
+                  'candidate workflow source must match receipt');
+              if (problems.length > 0) {
+                  for (const problem of problems) process.stdout.write(`::error::Release bundle rejected: ${problem}\n`);
+                  process.exit(1);
+              }
+              const prerelease = SEMVER.exec(family.version)?.[1] !== undefined;
+              const outputs = { tag: source.tag, tag_object: receiptSource.tagObject, commit: source.commit,
+                  title: `${family.name} v${family.version}`, package_name: family.name,
+                  package_version: family.version, dist_tag: family.distTag,
+                  prerelease: prerelease ? 'true' : 'false' };
+              appendFileSync(process.env.GITHUB_OUTPUT ?? '/dev/stdout',
+                  Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
+              process.exit(0);
+          }
+
           const releasePackage = section(release.package);
           const releaseCandidate = section(release.candidate);
           const registry = section(release.registry);
@@ -674,10 +743,24 @@ jobs:
           const REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
           const TAG = /^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
           const ASSET_DIGEST = /^sha256:([0-9a-f]{64})$/;
-          const ASSETS = ['package.tgz', 'candidate.json', 'release.json', 'RELEASE_NOTES.md', 'SHA256SUMS'];
+          const ASSETS = [];
           const NOT_FOUND = /HTTP 404|Not Found/;
 
           const directory = process.env.SALLYPORT_BUNDLE_DIR ?? '';
+          const assetReceipt = JSON.parse(readFileSync(join(directory, 'candidate.json'), 'utf8'));
+          if (assetReceipt?.protocol === 'sallyport/0.2' && assetReceipt?.schema === 2
+              && Array.isArray(assetReceipt.packages) && assetReceipt.packages.length > 1) {
+              for (const [index, member] of assetReceipt.packages.entries()) {
+                  const filename = `package-${String(index + 1)}.tgz`;
+                  if (member?.tarball?.filename !== filename) throw new Error('Invalid family asset roster.');
+                  ASSETS.push(filename);
+              }
+          } else if (assetReceipt?.protocol === 'sallyport/0.1' && assetReceipt?.schema === 1) {
+              ASSETS.push('package.tgz');
+          } else {
+              throw new Error('Unsupported candidate asset contract.');
+          }
+          ASSETS.push('candidate.json', 'release.json', 'RELEASE_NOTES.md', 'SHA256SUMS');
           const repository = process.env.SALLYPORT_REPOSITORY ?? '';
           const tag = process.env.SALLYPORT_TAG ?? '';
           const tagObject = process.env.SALLYPORT_TAG_OBJECT ?? '';

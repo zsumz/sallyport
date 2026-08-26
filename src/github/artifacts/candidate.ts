@@ -16,27 +16,31 @@ export async function fetchCandidateArtifact(
     return extractCandidateArtifact(zip);
 }
 
-// The candidate artifact contains exactly package.tgz and candidate.json.
+const FAMILY_TARBALL = /^package(?:-[1-9][0-9]*)?\.tgz$/u;
+
 export function extractCandidateArtifact(zip: Uint8Array): CandidateArtifactFiles {
     const entries = readZipEntries(zip);
     const names = entries.map((entry) => entry.name);
     const unexpected = names.filter(
-        (name) => name !== CANDIDATE_TARBALL_NAME && name !== CANDIDATE_RECEIPT_NAME,
+        (name) => name !== CANDIDATE_RECEIPT_NAME && !FAMILY_TARBALL.test(name),
     );
     if (unexpected.length > 0) {
         throw new Error(
-            `Candidate artifact contains unexpected entries: ${unexpected.join(', ')}.`,
+            'Candidate artifact contains unexpected entries: ' + unexpected.join(', ') + '.',
         );
     }
-    const tarball = entries.find((entry) => entry.name === CANDIDATE_TARBALL_NAME);
-    const receipt = entries.find((entry) => entry.name === CANDIDATE_RECEIPT_NAME);
-    if (tarball === undefined || receipt === undefined) {
-        throw new Error(
-            `Candidate artifact must contain ${CANDIDATE_TARBALL_NAME} and ${CANDIDATE_RECEIPT_NAME}.`,
-        );
-    }
-    if (names.length !== 2) {
+    if (new Set(names).size !== names.length) {
         throw new Error('Candidate artifact contains duplicate entries.');
     }
-    return { tarball: tarball.data, receipt: receipt.data };
+    const receipts = entries.filter((entry) => entry.name === CANDIDATE_RECEIPT_NAME);
+    const packed = entries.filter((entry) => FAMILY_TARBALL.test(entry.name));
+    if (receipts.length !== 1 || packed.length === 0) {
+        throw new Error(
+            'Candidate artifact must contain candidate.json and at least one package tarball.',
+        );
+    }
+    const tarballs = new Map(packed.map((entry) => [entry.name, entry.data]));
+    const legacy = tarballs.get(CANDIDATE_TARBALL_NAME) ?? packed[0]?.data;
+    if (legacy === undefined) throw new Error('Candidate artifact contains no package tarball.');
+    return { tarball: legacy, tarballs, receipt: receipts[0]?.data ?? new Uint8Array() };
 }

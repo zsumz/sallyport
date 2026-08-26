@@ -165,7 +165,7 @@ describe('reusable workflow contract', () => {
         const unsealed = stepsOf(workflow, 'prepare').find(
             (step) => (step.uses ?? '').includes('actions/upload-artifact'),
         );
-        expect(unsealed?.with?.path).toBe('${{ runner.temp }}/sallyport-out/package.tgz');
+        expect(unsealed?.with?.path).toBe('${{ runner.temp }}/sallyport-out/package*.tgz');
         expect(unsealed?.with?.['retention-days']).toBe(1);
         const upload = stepsOf(workflow, 'seal').find(
             (step) => (step.uses ?? '').includes('actions/upload-artifact'),
@@ -176,7 +176,7 @@ describe('reusable workflow contract', () => {
         expect(upload?.with?.['if-no-files-found']).toBe('error');
         const paths = text(upload?.with?.path).trim().split('\n').map((line) => line.trim());
         expect(paths).toEqual([
-            '${{ runner.temp }}/sallyport-out/package.tgz',
+            '${{ runner.temp }}/sallyport-out/package*.tgz',
             '${{ runner.temp }}/sallyport-out/candidate.json',
         ]);
     });

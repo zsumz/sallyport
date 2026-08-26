@@ -26,6 +26,7 @@ export interface ZipEntry {
 
 export interface CandidateArtifactFiles {
     tarball: Uint8Array;
+    tarballs: ReadonlyMap<string, Uint8Array>;
     receipt: Uint8Array;
 }
 

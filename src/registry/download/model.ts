@@ -1,4 +1,16 @@
-import type { CandidateReceipt } from '../../candidate/receipt.ts';
+export interface RegistryCandidate {
+    package: {
+        name: string;
+        version: string;
+        distTag: string;
+    };
+    tarball: {
+        bytes: number;
+        sha256: string;
+        sha512: string;
+        integrity: string;
+    };
+}
 
 // Injected effects. Every module in src/registry and src/github takes these as
 // parameters so unit tests run offline against plain functions.
@@ -44,7 +56,7 @@ export type VersionMetaLookup =
     | { outcome: 'malformed'; failures: string[] };
 
 export interface RegistryStateInput {
-    candidate: CandidateReceipt;
+    candidate: RegistryCandidate;
     packument: unknown;
     distTags: unknown;
     registry?: string;
@@ -64,7 +76,7 @@ export const retryPlan = {
 
 export interface RegistryConvergenceInput {
     fetch: RegistryFetch;
-    candidate: CandidateReceipt;
+    candidate: RegistryCandidate;
     sleep: (milliseconds: number) => Promise<void>;
     registry?: string;
 }

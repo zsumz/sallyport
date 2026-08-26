@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { hashTarball } from '../../../src/candidate/inspect.ts';
 import {
     buildCandidateReceipt,
+    buildFamilyCandidateReceipt,
+    buildFamilyReleaseRecord,
     buildReleaseRecord,
     CANDIDATE_TARBALL_FILENAME,
+    FAMILY_PROTOCOL,
+    FAMILY_SCHEMA_VERSION,
     PROTOCOL,
     RECEIPT_SCHEMA_VERSION,
     validateCandidateReceipt,
+    validateFamilyCandidateReceipt,
+    validateFamilyReleaseRecord,
     validateReleaseRecord,
     type CandidateReceiptParts,
     type ReleaseRecordParts,
@@ -277,5 +283,57 @@ describe('validateReleaseRecord', () => {
                 'releaseNotesSha256 must be a 64-character lowercase hexadecimal SHA-256'
                 + ' digest.',
             );
+    });
+});
+
+describe('package-family receipt contracts', () => {
+    it('builds matching sallyport/0.2 candidate and release records', () => {
+        const base = candidateParts();
+        const family = { name: 'entitykit', version: '0.1.0-alpha.1', distTag: 'alpha' };
+        const packageNames = ['@entitykit/core', '@entitykit/sqlite'];
+        const receipt = buildFamilyCandidateReceipt({
+            sallyport: base.sallyport,
+            repository: { ...base.repository, name: 'zsumz/entitykit' },
+            source: { ...base.source, tag: 'v0.1.0-alpha.1' },
+            family,
+            packages: packageNames.map((name, index) => ({
+                directory: 'packages/' + name.slice('@entitykit/'.length),
+                name,
+                version: family.version,
+                distTag: family.distTag,
+                tarball: { filename: `package-${String(index + 1)}.tgz`, ...DIGEST },
+            })),
+            run: base.run,
+        });
+        const record = buildFamilyReleaseRecord({
+            candidateReceiptSha256: RECEIPT_DIGEST.sha256,
+            releaseNotesSha256: RECEIPT_DIGEST.sha256,
+            family,
+            packages: packageNames.map((name) => ({
+                name,
+                version: family.version,
+                distTag: family.distTag,
+                candidate: { sha256: DIGEST.sha256, sha512: DIGEST.sha512 },
+                registry: {
+                    sha256: DIGEST.sha256,
+                    sha512: DIGEST.sha512,
+                    integrityVerified: true,
+                    signatureVerified: true,
+                    provenanceVerified: true,
+                },
+            })),
+            source: {
+                repository: 'zsumz/entitykit',
+                tag: 'v0.1.0-alpha.1',
+                commit: COMMIT,
+            },
+        });
+
+        expect(receipt.schema).toBe(FAMILY_SCHEMA_VERSION);
+        expect(receipt.protocol).toBe(FAMILY_PROTOCOL);
+        expect(record.schema).toBe(FAMILY_SCHEMA_VERSION);
+        expect(record.protocol).toBe(FAMILY_PROTOCOL);
+        expect(validateFamilyCandidateReceipt(receipt)).toEqual([]);
+        expect(validateFamilyReleaseRecord(record)).toEqual([]);
     });
 });

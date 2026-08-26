@@ -1,4 +1,7 @@
-import type { CandidateReceipt } from '../../../candidate/receipt.ts';
+import type {
+    CandidateReceipt,
+    FamilyCandidateReceipt,
+} from '../../../candidate/receipt.ts';
 import type { Profile } from '../../template.ts';
 
 export function receiptSummary(receipt: CandidateReceipt, profile: Profile): string {
@@ -21,6 +24,31 @@ export function receiptSummary(receipt: CandidateReceipt, profile: Profile): str
         `| Integrity | \`${receipt.tarball.integrity}\` |`,
         `| sallyport | \`${receipt.sallyport.version}\` @ \`${receipt.sallyport.sha}\` |`,
         `| Candidate run | ${String(receipt.run.id)} (attempt ${String(receipt.run.attempt)}) |`,
+        '',
+    ].join('\n');
+}
+
+export function familyReceiptSummary(
+    receipt: FamilyCandidateReceipt,
+    profile: Profile,
+): string {
+    const members = receipt.packages.map((member) =>
+        '- ' + member.name + '@' + member.version + ' -> '
+        + member.tarball.filename + ' (sha256 ' + member.tarball.sha256 + ')');
+    return [
+        '### sallyport package-family candidate',
+        '',
+        '| Field | Value |',
+        '| --- | --- |',
+        '| Family | ' + receipt.family.name + '@' + receipt.family.version + ' |',
+        '| Packages | ' + String(receipt.packages.length) + ' |',
+        '| Dist-tag | ' + receipt.family.distTag + ' |',
+        '| Tag | ' + receipt.source.tag + ' |',
+        '| Commit | ' + receipt.source.commit + ' |',
+        '| Profile | ' + profile + ' |',
+        '| Signer | ' + (receipt.source.signerFingerprint ?? 'unsigned') + ' |',
+        '',
+        ...members,
         '',
     ].join('\n');
 }

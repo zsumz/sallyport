@@ -54,7 +54,7 @@ describe('adversarial release model', () => {
         expect(prepare).toContain('npm ci');
         expect(prepare).not.toContain('internal create-candidate');
         expect(action('stage.yml', 'prepare', 'actions/upload-artifact').with?.path)
-            .toBe('${{ runner.temp }}/sallyport-out/package.tgz');
+            .toBe('${{ runner.temp }}/sallyport-out/package*.tgz');
         expect(seal).toContain('internal create-candidate');
         expect(seal).not.toMatch(/\bnpm\s+(?:ci|run)\b/u);
     });
@@ -141,8 +141,8 @@ describe('adversarial release model', () => {
             .filter((run) => run?.startsWith('npm ci')))
             .toStrictEqual(['npm ci --ignore-scripts']);
         const smokeScripts = scripts('finalize.yml', 'public_smoke');
-        expect(smokeScripts).toContain('smoke copy after smoke');
-        expect(smokeScripts).toContain('authoritative package.tgz after smoke');
+        expect(smokeScripts).toContain('internal smoke');
+        expect(smokeScripts).toContain('--candidate-dir "$RUNNER_TEMP/bundle"');
         expect(action('finalize.yml', 'release', 'actions/download-artifact').with?.['artifact-ids'])
             .toBe('${{ needs.verify_core.outputs.bundle_artifact_id }}');
         const release = scripts('finalize.yml', 'release');

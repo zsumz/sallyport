@@ -11,6 +11,7 @@ export type {
     FetchJson,
     FetchRequest,
     JsonResponse,
+    RegistryCandidate,
     RegistryConvergence,
     RegistryConvergenceInput,
     RegistryFetch,

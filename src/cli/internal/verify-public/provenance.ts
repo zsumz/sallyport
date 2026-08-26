@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { CandidateReceipt } from '../../../candidate/receipt.ts';
+import type { RegistryCandidate } from '../../../registry/download.ts';
 import {
     runAuditSignatures,
     verifyAuditProof,
@@ -17,7 +17,7 @@ import { PROVENANCE_DIRECTORY, type ProvenanceOutcome } from './model.ts';
 export async function verifyProvenance(
     effects: CliEffects,
     outputDir: string,
-    receipt: CandidateReceipt,
+    receipt: RegistryCandidate,
     expected: ExpectedProvenance,
 ): Promise<ProvenanceOutcome> {
     const installDir = path.join(outputDir, PROVENANCE_DIRECTORY);
