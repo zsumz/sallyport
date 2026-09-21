@@ -72,13 +72,13 @@
     "prepublishOnly": "node -e \"throw new Error('Publish sallyport only through .github/workflows/sallyport.yml.')\""
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@types/node": "^26.6.1",
+    "@vitest/coverage-v8": "^5.0.1",
     "eslint": "^10.6.0",
     "eslint-config-rubric": "^0.1.0-alpha.0",
     "smoque": "^0.1.1",
-    "typescript": "^5.9.0",
-    "vitest": "^4.1.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
     "yaml": "^2.6.0"
   },
   "license": "MIT"
